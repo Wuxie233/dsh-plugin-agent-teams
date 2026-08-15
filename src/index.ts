@@ -69,6 +69,8 @@ export interface Config {
   memberMaxDepth?: number
   /** Team size cap in members (default `8`). */
   maxMembers?: number
+  /** Role tokens whose members deny write/edit/bash on spawn (matched case-insensitively by substring). */
+  readOnlyRoles?: string[]
   /** Prompt-section order for the usage policy (default `117`, after delegation policy). */
   promptSectionOrder?: number
 }
@@ -79,6 +81,7 @@ export const Config: z<Config> = z.object({
   memberModel: z.string(),
   memberMaxDepth: z.natural().default(1),
   maxMembers: z.natural().min(1).default(8),
+  readOnlyRoles: z.array(z.string()).default(['scout', 'reviewer', 'planner', 'diagnostician']),
   promptSectionOrder: z.natural().default(117),
 })
 
@@ -102,6 +105,7 @@ export function apply(ctx: Context, config: Config): void {
     memberModel: config.memberModel,
     memberMaxDepth: config.memberMaxDepth ?? 1,
     maxMembers: config.maxMembers ?? 8,
+    readOnlyRoles: config.readOnlyRoles ?? ['scout', 'reviewer', 'planner', 'diagnostician'],
   }
 
   // Provider registration is a sibling plugin's effect (`subagent-spawn` /

@@ -20,6 +20,7 @@ import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { join } from 'node:path'
 import { readTeamSync } from './state.ts'
+import { isReadOnlyRole, READ_ONLY_DENY_TOOLS, readOnlyPersonaRule } from './roles.ts'
 import type { TeamMember, TeamState } from './types.ts'
 
 /** Captain-only AgentTeams tools hidden from newly spawned members. */
@@ -47,6 +48,23 @@ export interface MemberRuntimeConfig {
   provider: string
   /** Child delegation depth cap (0 forbids delegation entirely). */
   maxDepth?: number
+  /** Role tokens whose members additionally deny write-capable tools. */
+  readOnlyRoles?: readonly string[]
+}
+
+/**
+ * The full tool deny list for one member: captain-only tools for everyone,
+ * plus write-capable tools for read-only roles.
+ * @param member - the member being spawned (only its role is read).
+ * @param config - member runtime knobs carrying the read-only tokens.
+ * @returns the deny list for the child's `toolFilter`.
+ */
+function memberDenyTools(member: TeamMember, config: MemberRuntimeConfig): string[] {
+  const deny: string[] = [...MEMBER_DENIED_TOOLS]
+  if (isReadOnlyRole(member.role, config.readOnlyRoles ?? [])) {
+    deny.push(...READ_ONLY_DENY_TOOLS)
+  }
+  return deny
 }
 
 /** Durable provider/model/reasoning snapshot for one member. */
@@ -238,7 +256,7 @@ export function installMemberSelectionRuntime(ctx: Context, stateDir: string): M
  * @param stateDir - configured state directory, so the member can locate the
  *   team files with its own file tools.
  */
-export function memberPersona(team: TeamState, member: TeamMember, stateDir: string): string {
+export function memberPersona(team: TeamState, member: TeamMember, stateDir: string, readOnlyRoles: readonly string[] = []): string {
   return `You are ${member.name}, a member of the multi-agent team "${team.name}" running inside DeepSeek Harness AgentTeams. The captain leads the team; you are a worker member${member.role ? ` with the role: ${member.role}` : ''}.
 
 Team context:
@@ -253,7 +271,7 @@ Working rules:
 3. When finished, call agent_teams_update_task with status=completed and a concise \`output\` summarizing what you did and the key results.
 4. Send a short report to the captain with agent_teams_send_message (to=captain) when you complete a task or hit a blocker.
 5. To ask a teammate something, use agent_teams_send_message with to=<teammate name>; the message lands in their mailbox and wakes them directly — teammates talk to each other without the captain in the loop. The same applies to the captain (to=captain).
-6. You are a worker: do not create or delete teams, and do not add or remove members — that is the captain's job.`
+6. You are a worker: do not create or delete teams, and do not add or remove members — that is the captain's job.${isReadOnlyRole(member.role, readOnlyRoles) ? `\n${readOnlyPersonaRule()}` : ''}`
 }
 
 /**
@@ -315,8 +333,8 @@ export async function spawnMember(
       request: {
         prompt: [{ type: 'text', text: memberWelcome(team) }],
         parent: captain,
-        persona: memberPersona(team, member, stateDir),
-        toolFilter: { deny: [...MEMBER_DENIED_TOOLS] },
+        persona: memberPersona(team, member, stateDir, config.readOnlyRoles ?? []),
+        toolFilter: { deny: memberDenyTools(member, config) },
         agentOptions: {
           provider: llmSelection.provider,
           model: llmSelection.model,

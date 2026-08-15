@@ -56,6 +56,8 @@ export interface ToolsConfig {
   memberMaxDepth?: number
   /** Team size cap (members). */
   maxMembers: number
+  /** Role tokens whose members deny write/edit/bash on spawn. */
+  readOnlyRoles: readonly string[]
 }
 
 /** The caller agent, or a loud failure for non-agent callers. */
@@ -828,6 +830,7 @@ function memberRuntime(config: ToolsConfig): MemberRuntimeConfig {
   return {
     provider: config.memberProvider,
     maxDepth: config.memberMaxDepth,
+    readOnlyRoles: config.readOnlyRoles,
   }
 }
 
