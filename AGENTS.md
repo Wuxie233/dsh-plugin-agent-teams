@@ -19,6 +19,11 @@
   `agent_teams_report_issue` (captain or standalone only). Members are
   denied the tool; the shared usage section must stay silent about it.
   Collection label is `agent-teams-feedback`.
+- Members inherit the captain session cwd today. Local DSH now accepts a
+  provider-prepared child cwd, but this plugin must not auto-create a
+  worktree per member: cwd freezes at spawn, reviewers/planners should
+  stay on the captain tree, and write-capable members should opt in later.
+  Automatic `git worktree add` and merge are a later consumer of that seam.
 
 ## Commands
 
