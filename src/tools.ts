@@ -42,6 +42,12 @@ import {
   spawnMember,
   type MemberRuntimeConfig,
 } from './members.ts'
+import {
+  executeTeamReportIssue,
+  reportIssueReporter,
+  type IssueKind,
+  type IssueSeverity,
+} from './report-issue.ts'
 import type { TeamMember, TeamState, TeamTask } from './types.ts'
 
 /** Resolved plugin config consumed by the tools. */
@@ -782,6 +788,63 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
         mailbox_warnings: mailboxWarnings,
         mailbox_warning_count: mailboxWarningCount,
       }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'agent_teams_report_issue',
+    description: 'File a feedback issue about the AgentTeams plugin itself to its own issue tracker. Use when you hit an AgentTeams design flaw, an inefficient orchestration mechanism, a missing capability, or a plugin bug during real work. This is the plugin\'s self-iteration feedback layer: file the observation now, keep working, and triage the tracker in a later session. Captain or standalone session only. Do not use it for defects in the user\'s own project code.',
+    parameters: {
+      title: { type: 'string', required: true, description: 'Short issue title describing the plugin problem, not the current task.' },
+      body: { type: 'string', required: true, description: 'What is wrong, why it matters for orchestration, and the concrete evidence or symptom you observed.' },
+      kind: {
+        type: 'string',
+        required: true,
+        enum: ['design_flaw', 'inefficiency', 'bug', 'missing_capability'],
+        description: 'design_flaw: the mechanism is wrong or incoherent. inefficiency: it works but wastes wall-clock, context, or turns. bug: it misbehaves against its own documented contract. missing_capability: a needed mechanism does not exist.',
+      },
+      severity: {
+        type: 'string',
+        enum: ['critical', 'high', 'medium', 'low'],
+        description: 'critical: blocks or destroys work. high: forces a workaround every time. medium: real friction. low: papercut. Defaults to medium.',
+      },
+      trigger: { type: 'string', description: 'The concrete situation that exposed it: what you were orchestrating, which tool or member was involved, and what you had to do instead.' },
+      repro: { type: 'string', description: 'Optional reproduction steps when they are already known.' },
+      proposal: { type: 'string', description: 'Optional concrete fix direction or acceptance criterion, when you already know what the mechanism should do.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          url: { type: 'string', required: true },
+          repo: { type: 'string', required: true },
+          labels: { type: 'array', items: { type: 'string' }, required: true },
+          labelled: { type: 'boolean', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.labelled
+          ? `Filed on ${value.repo}: ${value.url}\nLabels: ${value.labels.join(', ')}`
+          : `Filed on ${value.repo} without labels (label step failed): ${value.url}`,
+      }],
+    },
+    async execute(args, exec) {
+      const caller = requireCaptain(exec)
+      const workspace = workspaceOf(caller)
+      const stateRoot = stateRootOf(workspace, config)
+      const team = await findTeamByParticipant(stateRoot, caller.id)
+      const reportedBy = reportIssueReporter(team, caller.id)
+      return executeTeamReportIssue({
+        title: args.title,
+        body: args.body,
+        kind: args.kind as IssueKind,
+        ...args.severity === undefined ? {} : { severity: args.severity as IssueSeverity },
+        ...args.trigger === undefined ? {} : { trigger: args.trigger },
+        ...args.repro === undefined ? {} : { repro: args.repro },
+        ...args.proposal === undefined ? {} : { proposal: args.proposal },
+      }, reportedBy)
     },
   }))
 

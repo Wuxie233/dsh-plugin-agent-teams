@@ -8,7 +8,7 @@
 
 | DSH 能力 | AgentTeams 用法 |
 |---|---|
-| `ctx.tools` 注册表 | 注册 9 个 `agent_teams_*` 工具（与 `tool-workflow` 同一注册路径） |
+| `ctx.tools` 注册表 | 注册 10 个 `agent_teams_*` 工具（与 `tool-workflow` 同一注册路径） |
 | `ctx.subagents.startContinuable()` | 创建成员：durable 可续聊子代理，带成员 persona |
 | `ctx.subagents.followup()` | 唤醒收件成员（消息进入其下一轮次） |
 | `ctx.subagents.listChildren()` | 查询成员实时活动（running / inactive） |
@@ -53,6 +53,7 @@
 | `agent_teams_send_message` | 任意成员→任意成员/队长：消息直达对方邮箱并唤醒对方（无队长转发；拒绝冒名 `from`） |
 | `agent_teams_status` | 团队全景：成员活动、任务清单、队长邮箱、各成员待读消息 |
 | `agent_teams_delete` | 结束团队：打断成员，团队目录**归档保留**（任务与依赖图、邮箱完整留存） |
+| `agent_teams_report_issue` | 队长或未建队会话把插件缺陷报到 `Wuxie233/dsh-plugin-agent-teams`；成员不可见也不可用 |
 
 `agent_teams_add_member` 默认不需要模型参数：它会快照队长当前请求真正生效的 LLM provider、model 与思考强度。用户明确要求某个角色使用其他模型时，可以同时传入可选的 `provider` + `model`；只覆盖 `model` 时沿用队长当前 LLM provider。插件不会为每个成员发起二次选择或弹窗，也不暴露逐成员思考强度参数。
 

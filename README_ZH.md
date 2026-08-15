@@ -16,7 +16,7 @@
 
 `dsh-agent-teams` 让当前 DeepSeek Harness 会话成为队长：创建可续聊的子 Agent、把目标拆成有依赖的任务，并通过直达消息协调成员工作。
 
-你只需用自然语言提出目标。插件会提供团队协议、9 个协作工具、持久化状态和实时 Web UI，不需要额外的 Workflow 引擎。
+你只需用自然语言提出目标。插件会提供团队协议、10 个协作工具、持久化状态和实时 Web UI，不需要额外的 Workflow 引擎。
 
 <p align="center">
   <img src="./assets/ui.png" width="100%" alt="DeepSeek Harness 对话与 AgentTeams 实时活动面板，展示成员、任务依赖和回报">
@@ -117,6 +117,7 @@ npx skills add NanmiCoder/dsh-agent-teams --skill dsh-plugin-development
 | 指南 | 内容 |
 | --- | --- |
 | [使用指南](./docs/usage.md) | 架构、UI 行为、工具、配置、限制与验证 |
+| [自迭代](./docs/self-iteration-spec.md) | 队长把插件缺陷报到本 fork 的 issue tracker |
 | [验证指南](./docs/verification-guide.md) | 离线、组合、真实 e2e 与 GUI 验证 |
 | [插件开发](./docs/developing-dsh-plugins.md) | 基于本插件整理的人类可读开发指南 |
 | [README 写作](./docs/readme-writing-guide.md) | 仓库文档约定 |

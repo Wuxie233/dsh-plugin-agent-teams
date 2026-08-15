@@ -24,12 +24,13 @@ import { isReadOnlyRole, READ_ONLY_DENY_TOOLS, readOnlyPersonaRule } from './rol
 import type { TeamMember, TeamState } from './types.ts'
 
 /** Captain-only AgentTeams tools hidden from newly spawned members. */
-const MEMBER_DENIED_TOOLS = [
+export const MEMBER_DENIED_TOOLS = [
   'agent_teams_create',
   'agent_teams_add_member',
   'agent_teams_remove_member',
   'agent_teams_create_task',
   'agent_teams_delete',
+  'agent_teams_report_issue',
 ] as const
 
 /**

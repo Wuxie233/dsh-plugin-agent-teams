@@ -16,7 +16,7 @@
 
 `dsh-agent-teams` turns the current DeepSeek Harness session into a captain that can assemble durable sub-agents, split a goal into dependency-aware tasks, and coordinate work through direct messages.
 
-Ask in natural language. The plugin provides the team protocol, nine coordination tools, persistent state, and a live Web UI—without requiring a separate workflow engine.
+Ask in natural language. The plugin provides the team protocol, ten coordination tools, persistent state, and a live Web UI—without requiring a separate workflow engine.
 
 <p align="center">
   <img src="./assets/ui.png" width="100%" alt="DeepSeek Harness conversation with the AgentTeams live activity panel, members, tasks, dependencies, and reports">
@@ -117,6 +117,7 @@ npx skills add NanmiCoder/dsh-agent-teams --skill dsh-plugin-development
 | Guide | Covers |
 | --- | --- |
 | [Usage](./docs/usage.md) | Architecture, UI behavior, tools, configuration, limits, and validation |
+| [Self-iteration](./docs/self-iteration-spec.md) | Captain-owned plugin-defect reports filed to this fork's issue tracker |
 | [Verification](./docs/verification-guide.md) | Offline, composition, real e2e, and GUI verification |
 | [Plugin development](./docs/developing-dsh-plugins.md) | Human-readable guide built from this plugin |
 | [README writing](./docs/readme-writing-guide.md) | Repository documentation conventions |

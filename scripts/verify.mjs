@@ -33,9 +33,17 @@ import { parseAgentTeamsCreateArgs } from '../lib/client/agent-teams-card-defini
 import { steerCaptainReport } from '../lib/tools.js'
 import {
   installMemberSelectionRuntime,
+  MEMBER_DENIED_TOOLS,
   resolveMemberLlmSelection,
   spawnMember,
 } from '../lib/members.js'
+import {
+  FEEDBACK_LABEL,
+  FEEDBACK_REPO,
+  buildIssueBody,
+  executeTeamReportIssue,
+  reportIssueReporter,
+} from '../lib/report-issue.js'
 
 let failures = 0
 function check(label, condition, detail = '') {
@@ -53,7 +61,7 @@ console.log('dsh-agent-teams offline verification')
 // loads this plugin, so it must equal the published package name. A mismatch
 // only surfaces after someone installs the package (the row fails to load),
 // never in local link-installed development — hence this pre-publish gate.
-console.log('1/7 packaging contract')
+console.log('1/8 packaging contract')
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 const patchText = await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
 const patchName = patchText
@@ -88,7 +96,7 @@ check(
   `bundle registers ${JSON.stringify(registeredId)}, package.json has ${JSON.stringify(pkg.name)}`,
 )
 
-console.log('2/7 pure rules')
+console.log('2/8 pure rules')
 check("sanitizeKey('My Team!') -> 'my-team'", sanitizeKey('My Team!') === 'my-team')
 // #15: an ASCII-only whitelist folded every non-Latin name onto one constant,
 // so distinct members shared a mailbox file and the second one was rejected as
@@ -122,7 +130,7 @@ check('in_progress -> completed allowed', transitionError('in_progress', 'comple
 check('completed -> in_progress denied', transitionError('completed', 'in_progress') !== undefined)
 check('same status is a no-op', transitionError('failed', 'failed') === undefined)
 
-console.log('3/7 dependency gating')
+console.log('3/8 dependency gating')
 const tasks = [
   { id: 't1', status: 'completed' },
   { id: 't2', status: 'pending' },
@@ -132,7 +140,7 @@ check('all-done deps satisfied', unsatisfiedDependencies(tasks, ['t1']).length =
 check('pending dep blocks', unsatisfiedDependencies(tasks, ['t2']).length === 1)
 check('failed dep blocks too', unsatisfiedDependencies(tasks, ['t3']).length === 1)
 
-console.log('4/7 on-disk team flow (temp dir)')
+console.log('4/8 on-disk team flow (temp dir)')
 const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-agent-teams-verify-'))
 try {
   const team = {
@@ -237,7 +245,7 @@ try {
   await rm(stateRoot, { recursive: true, force: true })
 }
 
-console.log('5/7 host visual-state functions (activity panel)')
+console.log('5/8 host visual-state functions (activity panel)')
 const { taskVisualState, taskDepthsById } = await import('../lib/state.js')
 const vtasks = [
   { id: 't1', subject: 'a', status: 'completed', assignee: 'alice', dependencies: [], createdAt: 0, updatedAt: 0 },
@@ -256,7 +264,7 @@ check('t2 depth 1 (longest path)', depths.get('t2') === 1)
 check('t3 depth 2', depths.get('t3') === 2)
 check('missing dep contributes no depth', depths.get('t4') === 0)
 
-console.log('6/7 client relationship projections')
+console.log('6/8 client relationship projections')
 const projectionTasks = [
   { id: 't4', dependencies: ['t2'], depth: 2 },
   { id: 't1', dependencies: [], depth: 0 },
@@ -309,7 +317,7 @@ check(
   steerCaptainReport({ steer: () => { throw new Error('offline') } }, 'alice', 'finished t1') === false,
 )
 
-console.log('7/7 member model selection and continuation restore')
+console.log('7/8 member model selection and continuation restore')
 const captain = {
   id: 'captain-session',
   options: { provider: 'birth-provider', model: 'birth-model' },
@@ -415,6 +423,10 @@ check(
   startSpec?.request?.agentOptions?.provider === 'other-provider'
     && startSpec?.request?.agentOptions?.model === 'other-model'
     && spawnMemberRecord.id === 'spawned-member',
+)
+check(
+  'spawn denies the captain-only report tool',
+  startSpec?.request?.toolFilter?.deny?.includes('agent_teams_report_issue') === true,
 )
 
 function descriptorEvent(label, agentProvider = 'descriptor-provider', agentModel = 'descriptor-model') {
@@ -532,6 +544,117 @@ try {
 } finally {
   await rm(restoreWorkspace, { recursive: true, force: true })
 }
+
+console.log('8/8 plugin self-iteration reports')
+const REPORT = {
+  title: 'design_flaw: Scout cannot read context files',
+  body: 'Context plugin returns a local file path but Scout agents cannot read it.',
+  kind: 'design_flaw',
+  severity: 'high',
+}
+const ISSUE_URL = 'https://github.com/Wuxie233/dsh-plugin-agent-teams/issues/42'
+const reportBody = buildIssueBody(REPORT, 'high', 'team `alpha`')
+check('report body includes kind and severity', reportBody.includes('`design_flaw`') && reportBody.includes('`high`'))
+check('report body includes problem text', reportBody.includes(REPORT.body))
+check('report body skips empty optional sections', !reportBody.includes('Where this surfaced') && !reportBody.includes('Reproduction'))
+check(
+  'report body includes optional sections when provided',
+  buildIssueBody({ ...REPORT, trigger: 'during review', repro: 'claim then status', proposal: 'return inline' }, 'medium', 'a standalone session')
+    .includes('Where this surfaced')
+    && buildIssueBody({ ...REPORT, trigger: 'during review' }, 'medium', 'a standalone session').includes('during review'),
+)
+check('report body attributes the captain team', reportBody.includes('agent_teams_report_issue') && reportBody.includes('team `alpha`'))
+check(
+  'standalone sessions may file feedback',
+  reportIssueReporter(undefined, 'solo-sess') === 'a standalone session',
+)
+check(
+  'captains may file feedback',
+  reportIssueReporter({ captainSessionId: 'lead-sess', name: 'my-team' }, 'lead-sess') === 'team `my-team`',
+)
+let memberReportRejected = false
+try {
+  reportIssueReporter({ captainSessionId: 'lead-sess', name: 'my-team' }, 'sess-alice')
+} catch (error) {
+  memberReportRejected = String(error).includes('captain')
+}
+check('members cannot file feedback', memberReportRejected)
+check(
+  'report tool is hidden from members',
+  MEMBER_DENIED_TOOLS.includes('agent_teams_report_issue'),
+)
+
+function makeMockRun(issueExitCode = 0) {
+  const calls = []
+  const run = async (args) => {
+    calls.push(args)
+    if (args.includes('create')) {
+      return {
+        exitCode: issueExitCode,
+        stdout: issueExitCode === 0 ? ISSUE_URL : '',
+        stderr: issueExitCode !== 0 ? 'label not found' : '',
+      }
+    }
+    return { exitCode: 0, stdout: '', stderr: '' }
+  }
+  return [run, () => calls]
+}
+
+const [happyRun, happyCalls] = makeMockRun()
+const filed = await executeTeamReportIssue(REPORT, 'a standalone session', happyRun)
+check('standalone report returns the issue URL', filed.url === ISSUE_URL && filed.labelled === true)
+check('reports always target the fork tracker', happyCalls().some(args => args.includes(FEEDBACK_REPO) && args.includes('create')))
+check('reports apply the collection label', happyCalls().find(args => args.includes('create'))?.includes(FEEDBACK_LABEL) === true)
+check('reports apply the kind label', happyCalls().find(args => args.includes('create'))?.includes('design-flaw') === true)
+check('reports apply the severity label', happyCalls().find(args => args.includes('create'))?.includes('severity:high') === true)
+check(
+  'omitted severity defaults to medium',
+  (await executeTeamReportIssue({ ...REPORT, severity: undefined }, 'a standalone session', makeMockRun()[0])).labels.includes('severity:medium'),
+)
+check('label creation is attempted three times', happyCalls().filter(args => args.includes('POST')).length === 3)
+
+const fallbackCalls = []
+let createCount = 0
+const fallbackRun = async (args) => {
+  fallbackCalls.push(args)
+  if (args.includes('create')) {
+    createCount += 1
+    if (createCount === 1) return { exitCode: 1, stdout: '', stderr: 'label not found' }
+    return { exitCode: 0, stdout: ISSUE_URL, stderr: '' }
+  }
+  return { exitCode: 0, stdout: '', stderr: '' }
+}
+const unlabeled = await executeTeamReportIssue(REPORT, 'a standalone session', fallbackRun)
+check('label failure retries without labels', unlabeled.labelled === false && unlabeled.url === ISSUE_URL)
+check('second create has no --label args', fallbackCalls.filter(args => args.includes('create'))[1]?.includes('--label') !== true)
+
+let bothCreatesFailed = false
+try {
+  await executeTeamReportIssue(REPORT, 'a standalone session', async (args) => (
+    args.includes('create')
+      ? { exitCode: 1, stdout: '', stderr: 'network error' }
+      : { exitCode: 0, stdout: '', stderr: '' }
+  ))
+} catch (error) {
+  bothCreatesFailed = String(error).includes('Could not file the issue')
+}
+check('both create attempts failing is loud', bothCreatesFailed)
+
+let emptyTitleRejected = false
+try {
+  await executeTeamReportIssue({ ...REPORT, title: '  ' }, 'a standalone session', makeMockRun()[0])
+} catch (error) {
+  emptyTitleRejected = String(error).includes('title is required')
+}
+check('empty title is rejected', emptyTitleRejected)
+
+let emptyBodyRejected = false
+try {
+  await executeTeamReportIssue({ ...REPORT, body: '  ' }, 'a standalone session', makeMockRun()[0])
+} catch (error) {
+  emptyBodyRejected = String(error).includes('body is required')
+}
+check('empty body is rejected', emptyBodyRejected)
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) FAILED`)

@@ -14,6 +14,10 @@ README/README_ZH/docs still apply unless overridden here.
 - New config key `readOnlyRoles: string[]` on the mount row.
 - Implementation: `src/roles.ts` + wiring in `members.ts` / `index.ts` /
   `tools.ts`.
+- **Self-iteration reports**: captain or standalone sessions can file
+  plugin-defect issues on `Wuxie233/dsh-plugin-agent-teams` via
+  `agent_teams_report_issue`. Members are denied the tool. Contract:
+  [docs/self-iteration-spec.md](docs/self-iteration-spec.md).
 
 ## Workflow
 

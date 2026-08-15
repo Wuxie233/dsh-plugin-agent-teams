@@ -124,6 +124,8 @@ export function apply(ctx: Context, config: Config): void {
     'agent_teams_send_message',
     'agent_teams_status',
     'agent_teams_delete',
+    // agent_teams_report_issue stays off this shared list: members share
+    // the usage section and must not be invited to hunt plugin defects.
   ].join(', ')
   ctx.systemPrompt.section({
     name: 'agent-teams:usage',
