@@ -656,6 +656,133 @@ try {
 }
 check('empty body is rejected', emptyBodyRejected)
 
+// ── member worktree spawn ────────────────────────────────────────────────────
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+
+const wtRoot = mkdtempSync(join(tmpdir(), 'agent-teams-wt-'))
+try {
+  execFileSync('git', ['-C', wtRoot, 'init', '-q'])
+  execFileSync('git', ['-C', wtRoot, 'config', 'user.email', 'verify@local'])
+  execFileSync('git', ['-C', wtRoot, 'config', 'user.name', 'verify'])
+  await writeFile(join(wtRoot, 'a.txt'), 'a\n')
+  execFileSync('git', ['-C', wtRoot, 'add', '.'])
+  execFileSync('git', ['-C', wtRoot, 'commit', '-qm', 'init'])
+  execFileSync('git', ['-C', wtRoot, 'worktree', 'add', '-q', '-b', 'lane-x', join(wtRoot, '.dsh-wt', 'lane-x')])
+  const worktreePath = join(wtRoot, '.dsh-wt', 'lane-x')
+
+  const wtCaptain = { id: 'wt-captain', session: { header: { cwd: wtRoot, id: 'wt-captain' } } }
+  const wtTeam = { name: 'WT Verify', id: 'wt-verify', captainSessionId: 'wt-captain', createdAt: Date.now(), members: [], tasks: [], taskSeq: 0 }
+  let wtSpec
+  let wtInterrupted = false
+  const wtMember = { id: '', name: 'lane-x', role: 'engineer', joinedAt: Date.now(), status: 'idle' }
+  await spawnMember(
+    {
+      subagents: {
+        getProvider: () => ({ prepareContinuable: () => undefined, capabilities: { persona: true, toolFilter: true } }),
+        list: () => ['spawn'],
+        startContinuable: async (spec) => {
+          wtSpec = spec
+          return { childId: 'wt-member', messageId: 'm1' }
+        },
+        interrupt: () => { wtInterrupted = true },
+      },
+      agents: { get: () => ({ session: { header: { cwd: worktreePath } } }) },
+    },
+    { provider: 'spawn', maxDepth: 1 },
+    { withPending: async (_p, _l, _s, op) => op() },
+    { provider: 'mock', model: 'mock' },
+    wtCaptain,
+    wtTeam,
+    wtMember,
+    '.agent-teams',
+    new AbortController().signal,
+    worktreePath,
+  )
+  check(
+    'worktree spawn passes cwd and records it on the member',
+    wtSpec?.cwd === worktreePath && wtMember.worktree === worktreePath && wtMember.id === 'wt-member' && wtInterrupted === false,
+  )
+  const pointer = JSON.parse(readFileSync(join(worktreePath, '.agent-teams', 'captain-pointer.json'), 'utf8'))
+  check(
+    'captain pointer names the captain workspace and team',
+    pointer.captainWorkspace === wtRoot && pointer.teamId === 'wt-verify',
+  )
+
+  const refuseSpawn = (runtimeConfig, memberDraft, worktreeArg) => spawnMember(
+    {
+      subagents: {
+        getProvider: () => ({ prepareContinuable: () => undefined, capabilities: { persona: true, toolFilter: true } }),
+        list: () => ['spawn'],
+        startContinuable: async () => { throw new Error('must not spawn') },
+      },
+      agents: { get: () => ({ session: { header: { cwd: wtRoot } } }) },
+    },
+    runtimeConfig,
+    { withPending: async (_p, _l, _s, op) => op() },
+    { provider: 'mock', model: 'mock' },
+    wtCaptain,
+    wtTeam,
+    memberDraft,
+    '.agent-teams',
+    new AbortController().signal,
+    worktreeArg,
+  )
+
+  let readOnlyRefused = false
+  try {
+    await refuseSpawn(
+      { provider: 'spawn', maxDepth: 1, readOnlyRoles: ['reviewer'] },
+      { id: '', name: 'rv', role: 'reviewer', joinedAt: Date.now(), status: 'idle' },
+      worktreePath,
+    )
+  } catch (error) {
+    readOnlyRefused = String(error).includes('read-only role')
+  }
+  check('read-only role refuses a worktree', readOnlyRefused)
+
+  let relativeRefused = false
+  try {
+    await refuseSpawn(
+      { provider: 'spawn', maxDepth: 1 },
+      { id: '', name: 'rel', role: 'engineer', joinedAt: Date.now(), status: 'idle' },
+      'relative/path',
+    )
+  } catch (error) {
+    relativeRefused = String(error).includes('absolute path')
+  }
+  check('relative worktree path is rejected', relativeRefused)
+
+  let seamMissLoud = false
+  try {
+    await spawnMember(
+      {
+        subagents: {
+          getProvider: () => ({ prepareContinuable: () => undefined, capabilities: { persona: true, toolFilter: true } }),
+          list: () => ['spawn'],
+          startContinuable: async () => ({ childId: 'silent-member', messageId: 'm2' }),
+          interrupt: () => {},
+        },
+        agents: { get: () => ({ session: { header: { cwd: wtRoot } } }) },
+      },
+      { provider: 'spawn', maxDepth: 1 },
+      { withPending: async (_p, _l, _s, op) => op() },
+      { provider: 'mock', model: 'mock' },
+      wtCaptain,
+      wtTeam,
+      { id: '', name: 'silent', role: 'engineer', joinedAt: Date.now(), status: 'idle' },
+      '.agent-teams',
+      new AbortController().signal,
+      worktreePath,
+    )
+  } catch (error) {
+    seamMissLoud = String(error).includes('child-cwd seam')
+  }
+  check('unpatched runtime seam fails loud and interrupts the member', seamMissLoud)
+} finally {
+  rmSync(wtRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+}
+
 if (failures > 0) {
   console.error(`\n${failures} check(s) FAILED`)
   process.exit(1)

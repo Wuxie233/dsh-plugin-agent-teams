@@ -19,11 +19,20 @@
   `agent_teams_report_issue` (captain or standalone only). Members are
   denied the tool; the shared usage section must stay silent about it.
   Collection label is `agent-teams-feedback`.
-- Members inherit the captain session cwd today. Local DSH now accepts a
-  provider-prepared child cwd, but this plugin must not auto-create a
-  worktree per member: cwd freezes at spawn, reviewers/planners should
-  stay on the captain tree, and write-capable members should opt in later.
-  Automatic `git worktree add` and merge are a later consumer of that seam.
+- Members accept an opt-in per-member git worktree (`worktree` arg on
+  add_member). cwd freezes at spawn, so the captain creates the tree first
+  and plans tasks per member-tree. Read-only roles refuse worktrees.
+  The plugin writes `<worktree>/<stateDir>/captain-pointer.json` and all
+  member-side tools resolve team state through it; the pointer is trusted
+  the same way the team files are (persona forbids direct edits).
+  Merge order follows the task DAG; conflicts are captain-adjudicated.
+  Worktree creation, merge, and removal stay captain-owned git operations.
+- The worktree path needs the patched runtime: local DSH commits
+  `a4b50ba` + `82b943e` (child-cwd seam) and the deployment-bundle patch
+  marked `LOCAL-PATCH-child-cwd.txt`. spawnMember fails loud and
+  interrupts the member when the runtime ignores the cwd override.
+  On a sandboxed preset, a worktree member may lose read access to team
+  state under the captain tree (danger-full-access on this host is fine).
 
 ## Commands
 

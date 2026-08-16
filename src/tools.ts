@@ -27,6 +27,7 @@ import {
   findTeamByParticipant,
   readMailbox,
   readTeam,
+  resolveTeamWorkspace,
   sanitizeKey,
   transitionError,
   unsatisfiedDependencies,
@@ -74,9 +75,9 @@ function requireCaptain(exec: ToolRunContext): Agent {
   return exec.agent
 }
 
-/** The captain's workspace directory (team state root parent). */
-function workspaceOf(agent: Agent): string {
-  return agent.session.header.cwd ?? process.cwd()
+/** The workspace owning team state: the caller's own, or the captain's when the caller runs inside a member worktree. */
+function workspaceOf(agent: Agent, stateDir: string): string {
+  return resolveTeamWorkspace(agent.session.header.cwd ?? process.cwd(), stateDir)
 }
 
 /** Resolved absolute state root. */
@@ -226,7 +227,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
+      const workspace = workspaceOf(captain, config.stateDir)
       const stateRoot = stateRootOf(workspace, config)
       const teamName = args.name.trim()
       if (teamName === '') throw new Error('team name must not be empty')
@@ -273,6 +274,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
       role: { type: 'string', description: 'Role of the member (e.g. researcher, engineer, reviewer).' },
       provider: { type: 'string', description: 'Optional LLM provider route. Use only when the user explicitly requests a different provider; requires model.' },
       model: { type: 'string', description: 'Optional model override. Omit for the captain\'s current model (or the configured memberModel default).' },
+      worktree: { type: 'string', description: 'Optional absolute path of an existing git worktree the captain created (git worktree add). The member is spawned inside it for write isolation; read-only roles refuse it. Merging and removing the worktree stay captain-owned git operations.' },
     },
     output: {
       schema: {
@@ -284,17 +286,18 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           provider: { type: 'string', required: true },
           model: { type: 'string', required: true },
           reasoning_effort: { type: 'string' },
+          worktree: { type: 'string' },
           status: { type: 'string', required: true },
         },
       },
       render: (args, value) => [{
         type: 'text',
-        text: `Member "${value.member_name}" added (subagent id ${value.member_id}, ${value.provider}/${value.model}${value.reasoning_effort === undefined ? '' : `, reasoning ${value.reasoning_effort}`}, status ${value.status}).`,
+        text: `Member "${value.member_name}" added (subagent id ${value.member_id}, ${value.provider}/${value.model}${value.reasoning_effort === undefined ? '' : `, reasoning ${value.reasoning_effort}`}${value.worktree === undefined ? '' : `, worktree ${value.worktree}`}, status ${value.status}).`,
       }],
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
+      const workspace = workspaceOf(captain, config.stateDir)
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireCaptainTeam(workspace, config, captain)
       return withTeamLock(teamLockKey(stateRoot, team.id), async () => {
@@ -336,6 +339,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           member,
           config.stateDir,
           exec.signal,
+          args.worktree,
         )
         fresh.members.push(member)
         await writeTeam(stateRoot, fresh)
@@ -344,6 +348,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           memberId: member.id,
           name: member.name,
           ...member.role !== undefined ? { role: member.role } : {},
+          ...member.worktree !== undefined ? { worktree: member.worktree } : {},
         })
         return {
           member_name: member.name,
@@ -353,6 +358,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           ...selection.reasoningEffort === undefined
             ? {}
             : { reasoning_effort: selection.reasoningEffort },
+          ...member.worktree !== undefined ? { worktree: member.worktree } : {},
           status: member.status,
         }
       })
@@ -381,7 +387,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
+      const workspace = workspaceOf(captain, config.stateDir)
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireCaptainTeam(workspace, config, captain)
       return withTeamLock(teamLockKey(stateRoot, team.id), async () => {
@@ -430,7 +436,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
+      const workspace = workspaceOf(captain, config.stateDir)
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireCaptainTeam(workspace, config, captain)
       return withTeamLock(teamLockKey(stateRoot, team.id), async () => {
@@ -496,7 +502,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const caller = requireCaptain(exec)
-      const workspace = workspaceOf(caller)
+      const workspace = workspaceOf(caller, config.stateDir)
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireParticipantTeam(workspace, config, caller)
       return withTeamLock(teamLockKey(stateRoot, team.id), async () => {
@@ -578,7 +584,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const caller = requireCaptain(exec)
-      const workspace = workspaceOf(caller)
+      const workspace = workspaceOf(caller, config.stateDir)
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireParticipantTeam(workspace, config, caller)
       return withTeamLock(teamLockKey(stateRoot, team.id), async () => {
@@ -639,7 +645,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const caller = requireCaptain(exec)
-      const workspace = workspaceOf(caller)
+      const workspace = workspaceOf(caller, config.stateDir)
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireParticipantTeam(workspace, config, caller)
       const to = args.to.trim()
@@ -693,7 +699,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
         const senderText = prepared.from === CAPTAIN_KEY
           ? args.content
           : `Message from team member ${prepared.from}:\n\n${args.content}`
-        const text = `AgentTeams state policy: inspect ${config.stateDir}/${prepared.fresh.id}/ read-only; never edit team.json or inbox files directly. Use agent_teams_* tools for team state.\n\n${senderText}`
+        const text = `AgentTeams state policy: inspect ${join(stateRoot, prepared.fresh.id)} read-only; never edit team.json or inbox files directly. Use agent_teams_* tools for team state.\n\n${senderText}`
         const accepted = await deliverToMember(ctx, captain, prepared.recipient.id, text, exec.signal)
         delivered = accepted ? 'wake' : 'mailbox'
       }
@@ -716,7 +722,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(_args, exec) {
       const caller = requireCaptain(exec)
-      const workspace = workspaceOf(caller)
+      const workspace = workspaceOf(caller, config.stateDir)
       const stateRoot = stateRootOf(workspace, config)
       const located = await requireParticipantTeam(workspace, config, caller)
       const { team, identity } = await withTeamLock(
@@ -732,6 +738,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           provider: member.provider ?? '',
           model: member.model ?? '',
           reasoning_effort: member.reasoningEffort ?? '',
+          worktree: member.worktree ?? '',
           status: member.status,
           activity: member.id !== '' ? (activity.get(member.id) ?? 'unknown') : 'unspawned',
         }))
@@ -832,7 +839,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(args, exec) {
       const caller = requireCaptain(exec)
-      const workspace = workspaceOf(caller)
+      const workspace = workspaceOf(caller, config.stateDir)
       const stateRoot = stateRootOf(workspace, config)
       const team = await findTeamByParticipant(stateRoot, caller.id)
       const reportedBy = reportIssueReporter(team, caller.id)
@@ -868,7 +875,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
     },
     async execute(_args, exec) {
       const captain = requireCaptain(exec)
-      const workspace = workspaceOf(captain)
+      const workspace = workspaceOf(captain, config.stateDir)
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireCaptainTeam(workspace, config, captain)
       await withTeamLock(teamLockKey(stateRoot, team.id), async () => {
@@ -909,6 +916,7 @@ function renderStatus(value: JsonValue): string {
       provider: string
       model: string
       reasoning_effort: string
+      worktree: string
       status: string
       activity: string
     }[]
@@ -925,7 +933,8 @@ function renderStatus(value: JsonValue): string {
     ...team.members.map((member) => {
       const route = member.provider && member.model ? ` · ${member.provider}/${member.model}` : ''
       const effort = member.reasoning_effort ? ` · reasoning ${member.reasoning_effort}` : ''
-      return `  - ${member.name} [${member.role}] ${member.status}/${member.activity}${route}${effort}`
+      const tree = member.worktree ? ` · wt ${member.worktree}` : ''
+      return `  - ${member.name} [${member.role}] ${member.status}/${member.activity}${route}${effort}${tree}`
     }),
     `Tasks (${team.tasks.length}):`,
     ...team.tasks.map((task) => {

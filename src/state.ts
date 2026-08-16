@@ -44,6 +44,51 @@ export async function withTeamLock<T>(key: string, fn: () => Promise<T>): Promis
   }
 }
 
+/** Pointer file name placed inside a member worktree's state directory. */
+export const CAPTAIN_POINTER_FILE = 'captain-pointer.json'
+
+/** Captain-workspace pointer written into each member worktree. */
+export interface CaptainPointer {
+  /** Absolute workspace directory that owns the team state. */
+  captainWorkspace: string
+  /** Team id the worktree member belongs to. */
+  teamId: string
+}
+
+/**
+ * Write the captain pointer into one member worktree, so tools called from
+ * inside that worktree resolve team state under the captain workspace.
+ * @param worktree - the member worktree root.
+ * @param stateDir - configured state directory name.
+ * @param pointer - the captain workspace and team id to record.
+ */
+export async function writeCaptainPointer(worktree: string, stateDir: string, pointer: CaptainPointer): Promise<void> {
+  const dir = join(worktree, stateDir)
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, CAPTAIN_POINTER_FILE), `${JSON.stringify(pointer, null, 2)}\n`, 'utf8')
+}
+
+/**
+ * Resolve the workspace owning team state for a working directory that may be
+ * a member worktree. Sync because every tool call resolves it.
+ * @param ownCwd - the calling agent's session working directory.
+ * @param stateDir - configured state directory name.
+ * @returns the captain workspace when a pointer names one, else `ownCwd`.
+ */
+export function resolveTeamWorkspace(ownCwd: string, stateDir: string): string {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(join(ownCwd, stateDir, CAPTAIN_POINTER_FILE), 'utf8'))
+    if (typeof parsed === 'object' && parsed !== null) {
+      const captain = (parsed as { captainWorkspace?: unknown }).captainWorkspace
+      if (typeof captain === 'string' && captain.startsWith('/')) return captain
+    }
+  } catch {
+    // No pointer, malformed JSON, or unreadable path: the caller's own
+    // workspace owns the state. Same-tree members never have a pointer.
+  }
+  return ownCwd
+}
+
 /** Longest key emitted before truncating and appending a digest. */
 const MAX_KEY_LENGTH = 48
 

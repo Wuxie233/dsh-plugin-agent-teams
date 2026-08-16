@@ -18,6 +18,14 @@ README/README_ZH/docs still apply unless overridden here.
   plugin-defect issues on `Wuxie233/dsh-plugin-agent-teams` via
   `agent_teams_report_issue`. Members are denied the tool. Contract:
   [docs/self-iteration-spec.md](docs/self-iteration-spec.md).
+- **Per-member git worktrees** (requires the patched runtime, see
+  AGENTS.md): `agent_teams_add_member` accepts an absolute `worktree`
+  path the captain created. The member spawns inside it
+  (`ContinuableStartSpec.cwd`), a captain-pointer file redirects its
+  team-state resolution back to the captain workspace, read-only roles
+  refuse worktrees, and merge/removal stay captain-owned git operations.
+  Implementation: `state.ts` pointer helpers + `members.ts` spawn path +
+  `tools.ts` wiring.
 
 ## Workflow
 

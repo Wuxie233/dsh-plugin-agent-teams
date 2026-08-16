@@ -56,6 +56,12 @@ export interface TeamMember {
   model?: string
   /** Resolved reasoning effort captured from the captain's current session. */
   reasoningEffort?: string
+  /**
+   * Absolute git worktree path this member was spawned inside, when the
+   * captain requested write isolation. Merge and removal stay captain-owned
+   * git operations; the plugin never mutates the worktree lifecycle.
+   */
+  worktree?: string
   joinedAt: number
   status: MemberStatus
 }

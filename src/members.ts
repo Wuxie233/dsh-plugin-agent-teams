@@ -18,8 +18,9 @@ import { installModelSelection, type Agent, type ModelSelection } from '@deepsee
 import { foldSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { join } from 'node:path'
-import { readTeamSync } from './state.ts'
+import { existsSync } from 'node:fs'
+import { isAbsolute, join } from 'node:path'
+import { readTeamSync, resolveTeamWorkspace, writeCaptainPointer } from './state.ts'
 import { isReadOnlyRole, READ_ONLY_DENY_TOOLS, readOnlyPersonaRule } from './roles.ts'
 import type { TeamMember, TeamState } from './types.ts'
 
@@ -208,7 +209,7 @@ export function installMemberSelectionRuntime(ctx: Context, stateDir: string): M
       if (separator < 1 || separator === identity.length - 1) return () => undefined
       const teamId = identity.slice(0, separator)
       const memberName = identity.slice(separator + 1)
-      const workspace = child.session.header.cwd ?? process.cwd()
+      const workspace = resolveTeamWorkspace(child.session.header.cwd ?? process.cwd(), stateDir)
       const team = readTeamSync(join(workspace, stateDir), teamId)
       if (team?.captainSessionId !== parentSessionId) return () => undefined
       selection = selectionFromMember(team.members.find(member => member.name === memberName))
@@ -295,6 +296,8 @@ export function memberWelcome(team: TeamState): string {
  * @param member - the member draft whose `id` is filled on success.
  * @param stateDir - configured state directory (for the persona).
  * @param signal - caller cancellation, forwarded to the start.
+ * @param worktree - optional absolute git worktree the member is spawned
+ *   inside for write isolation; read-only roles refuse it.
  */
 export async function spawnMember(
   ctx: Context,
@@ -306,6 +309,7 @@ export async function spawnMember(
   member: TeamMember,
   stateDir: string,
   signal: AbortSignal,
+  worktree?: string,
 ): Promise<void> {
   // Fail loud at the first use: provider registration is a sibling plugin's
   // effect and may settle after this plugin mounts. Capability checks here
@@ -326,26 +330,65 @@ export async function spawnMember(
   if (!provider.capabilities.toolFilter) {
     throw new Error(`agent-teams: provider "${config.provider}" cannot restrict captain-only tools for members`)
   }
+  // Optional chain: offline verification drives a partial captain fake.
+  const captainWorkspace = captain.session.header?.cwd ?? process.cwd()
+  if (worktree !== undefined) {
+    if (isReadOnlyRole(member.role, config.readOnlyRoles ?? [])) {
+      throw new Error(`agent-teams: read-only role "${member.role}" cannot use a worktree; reviewers stay on the captain tree`)
+    }
+    if (!isAbsolute(worktree)) {
+      throw new Error(`agent-teams: member worktree must be an absolute path, got "${worktree}"`)
+    }
+    if (!existsSync(join(worktree, '.git'))) {
+      throw new Error(`agent-teams: member worktree has no .git entry (not a git worktree?): ${worktree}`)
+    }
+  }
   const label = `${MEMBER_LABEL_PREFIX}${team.id}:${member.name}`
-  const start = await selections.withPending(captain.id, label, llmSelection, () => (
-    ctx.subagents.startContinuable({
-      provider: config.provider,
-      label,
-      request: {
-        prompt: [{ type: 'text', text: memberWelcome(team) }],
-        parent: captain,
-        persona: memberPersona(team, member, stateDir, config.readOnlyRoles ?? []),
-        toolFilter: { deny: memberDenyTools(member, config) },
-        agentOptions: {
-          provider: llmSelection.provider,
-          model: llmSelection.model,
-        },
-        ...config.maxDepth !== undefined ? { maxDepth: config.maxDepth } : {},
+  // Local seam: ContinuableStartSpec.cwd (patched dsh-subagent). rc.6 types
+  // lack the field, so the intersection is assigned through the base shape.
+  type ContinuableStartInput = Parameters<typeof ctx.subagents.startContinuable>[0]
+  const startSpec: ContinuableStartInput & { cwd?: string } = {
+    provider: config.provider,
+    label,
+    request: {
+      prompt: [{ type: 'text', text: memberWelcome(team) }],
+      parent: captain,
+      persona: memberPersona(
+        team,
+        member,
+        worktree !== undefined ? join(captainWorkspace, stateDir) : stateDir,
+        config.readOnlyRoles ?? [],
+      ),
+      toolFilter: { deny: memberDenyTools(member, config) },
+      agentOptions: {
+        provider: llmSelection.provider,
+        model: llmSelection.model,
       },
-      signal,
-    })
+      ...config.maxDepth !== undefined ? { maxDepth: config.maxDepth } : {},
+    },
+    ...worktree !== undefined ? { cwd: worktree } : {},
+    signal,
+  }
+  const start = await selections.withPending(captain.id, label, llmSelection, () => (
+    ctx.subagents.startContinuable(startSpec as ContinuableStartInput)
   ))
+  if (worktree !== undefined) {
+    // Fail loud when the runtime ignored the cwd override: an unpatched
+    // dsh-subagent silently spawns the member on the captain tree, which
+    // defeats the requested write isolation.
+    const liveChild = ctx.agents.get(start.childId)
+    const headerCwd = liveChild?.session.header.cwd
+    if (headerCwd !== undefined && headerCwd !== worktree) {
+      interruptMember(ctx, captain, start.childId)
+      throw new Error(
+        `agent-teams: the harness runtime did not apply the member worktree cwd (header says "${headerCwd}") — `
+        + 'the deployed dsh-subagent lacks the child-cwd seam; redeploy the patched deployment and restart dsh web',
+      )
+    }
+    await writeCaptainPointer(worktree, stateDir, { captainWorkspace, teamId: team.id })
+  }
   member.id = start.childId
+  member.worktree = worktree
 }
 
 /**
