@@ -57,6 +57,8 @@
 
 `agent_teams_add_member` 默认不需要模型参数：它会快照队长当前请求真正生效的 LLM provider、model 与思考强度。用户明确要求某个角色使用其他模型时，可以同时传入可选的 `provider` + `model`；只覆盖 `model` 时沿用队长当前 LLM provider。插件不会为每个成员发起二次选择或弹窗，也不暴露逐成员思考强度参数。
 
+可选参数 `worktree` 是队长已经建好的 git worktree 绝对路径。成员出生在这棵树里，cwd 在 spawn 时冻结；只读角色拒绝该参数。团队状态仍写在队长工作区的 `.agent-teams/`，成员树里只有一个 `captain-pointer.json` 把工具解析指回去。建树、合并、删除 worktree 都是队长的 git 操作，插件不管生命周期。默认不要传：写者共享队长工作区、靠独占路径并行。
+
 ## 配置
 
 在 profile 的 `cordis.patch.yml` 中覆盖：
@@ -75,13 +77,14 @@
 
 ## 使用协议
 
-插件提示段会指导模型按协议执行：建团队 → 按角色拉成员 → 拆任务并声明依赖 → 领取并唤醒成员 → 轮询 `agent_teams_status` 收集产出 → 汇报后 `agent_teams_delete`。成员之间可以直接互发消息（`agent_teams_send_message` 直达对方邮箱并唤醒对方），无需队长中转。
+插件提示段会指导模型按协议执行：建团队 → 拆任务并声明依赖 → 按角色拉成员（需要写隔离时先建 worktree 再加人）→ 领取并唤醒成员 → 轮询 `agent_teams_status` 收集产出 → 汇报后 `agent_teams_delete`。成员之间可以直接互发消息（`agent_teams_send_message` 直达对方邮箱并唤醒对方），无需队长中转。
 
 ## 已知限制
 
 - 成员在收到消息（被唤醒）后才行动，没有常驻轮询；队长离线时消息留在邮箱、待队长下次操作时投递。
 - 一个队长同时只能带一个团队（与 Claude Code AgentTeams 一致）。
-- 成员 persona 替换部署默认 persona；成员仍拥有完整工具集（bash/fs/web 等）。
+- 成员 persona 替换部署默认 persona。写者默认拥有完整工具集；只读角色在 spawn 时被拒绝 `write` / `edit` / `bash`。
+- 可选成员 worktree 依赖本机打过 cwd 缝的 runtime；缝没打上时 spawn 会 fail loud 并打断该成员，不会静默写回队长树。deployment 的 `pnpm install` 会冲掉这份缝。
 - 团队状态为文件级持久化，多进程同时操作同一团队不保证一致（同一 dsh 进程内已用锁串行化）。
 - 活动面板读磁盘真相（1s 轮询），与会话日志事件流相互独立。
 - 右上角浮层通过 body portal 挂载；宽屏展开时主对话列平滑向左礼让空间，窄屏退回 overlay 模式，左侧导航保持不动。
