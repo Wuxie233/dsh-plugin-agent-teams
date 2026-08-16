@@ -15,6 +15,10 @@
   Don't make it required.
 - Deploy by copy (`install.sh`), never symlink (Node ESM resolution).
 - Host-half changes need a dsh web restart; client-half only a page refresh.
+- Panel/status "working" is turn activity, not `listChildren().activity`.
+  The store bit is `running` whenever the child session is still live in
+  `ctx.sessions`; a stopped conversation stays loaded. `memberActivity`
+  and the activity snapshot refine that through `ctx.agents.get(id).status`.
 - Plugin-defect reports go to `Wuxie233/dsh-plugin-agent-teams` through
   `agent_teams_report_issue` (captain or standalone only). Members are
   denied the tool; the shared usage section must stay silent about it.

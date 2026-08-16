@@ -11,7 +11,7 @@
 | `ctx.tools` 注册表 | 注册 10 个 `agent_teams_*` 工具（与 `tool-workflow` 同一注册路径） |
 | `ctx.subagents.startContinuable()` | 创建成员：durable 可续聊子代理，带成员 persona |
 | `ctx.subagents.followup()` | 唤醒收件成员（消息进入其下一轮次） |
-| `ctx.subagents.listChildren()` | 查询成员实时活动（running / inactive） |
+| `ctx.subagents.listChildren()` + `ctx.agents.get().status` | 查询成员是否正在跑一轮（store 里的 `running` 只表示会话还在内存，停掉的对话仍可能是 `running`） |
 | `ctx.systemPrompt.section()` | 注册"AgentTeams 使用策略"提示段 |
 | Web server 路由注册 | 活动面板数据路由 `/plugins/dsh-agent-teams/state` + 鲸鱼图片静态服务（`webServer`/`httpServer` 双键兼容，见下） |
 | 文件系统 | 团队状态持久化在 `<workspace>/.agent-teams/<teamId>/` |
@@ -86,7 +86,7 @@
 - 成员 persona 替换部署默认 persona。写者默认拥有完整工具集；只读角色在 spawn 时被拒绝 `write` / `edit` / `bash`。
 - 可选成员 worktree 依赖本机打过 cwd 缝的 runtime；缝没打上时 spawn 会 fail loud 并打断该成员，不会静默写回队长树。deployment 的 `pnpm install` 会冲掉这份缝。
 - 团队状态为文件级持久化，多进程同时操作同一团队不保证一致（同一 dsh 进程内已用锁串行化）。
-- 活动面板读磁盘真相（1s 轮询），与会话日志事件流相互独立。
+- 活动面板读磁盘真相（1s 轮询），与会话日志事件流相互独立。成员「工作中」只看 live Agent 是否正在跑一轮；会话还在内存、对话已停止时显示空闲，不沿用 `listChildren().activity`。
 - 右上角浮层通过 body portal 挂载；宽屏展开时主对话列平滑向左礼让空间，窄屏退回 overlay 模式，左侧导航保持不动。
 - 成员（模型）不总是严格走工具"仪式"（如完成时不调 `agent_teams_update_task`）——面板如实反映磁盘真相，队长以 `agent_teams_status`/文件为准汇总。
 

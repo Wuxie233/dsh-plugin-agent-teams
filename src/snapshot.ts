@@ -2,16 +2,17 @@
  * Team activity snapshot assembly for the activity panel.
  *
  * Server-side assembly mirrors the Claude Code desktop teamWatcher: read the
- * durable team files (the truth source) and enrich with live subagent
- * activity, so the panel always reflects the on-disk state even when a model
- * skipped a tool "ritual" (e.g. not calling update_task on completion).
+ * durable team files (the truth source) and enrich with live turn activity,
+ * so the panel always reflects the on-disk state even when a model skipped a
+ * tool "ritual" (e.g. not calling update_task on completion). "Working" is
+ * the child's live Agent driver, not `listChildren().activity`.
  * @module dsh-agent-teams/snapshot
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { memberActivity } from './members.ts'
 import {
   CAPTAIN_KEY, listArchivedTeamIds, readArchivedTeam, readMailbox, readTeam,
   taskDepthsById, taskVisualState,
@@ -73,8 +74,8 @@ function currentTaskOf(memberName: string, tasks: readonly TeamTask[]): string {
 }
 
 /**
- * Assemble one team snapshot from its durable files plus live activity.
- * @param ctx - the plugin context (injects `subagents`, used for activity).
+ * Assemble one team snapshot from its durable files plus live turn activity.
+ * @param ctx - the plugin context (injects `subagents` and `agents`).
  * @param stateRoot - resolved absolute state root of the owning workspace.
  * @param workspace - display name of the owning workspace.
  * @param state - the durable team record.
@@ -88,13 +89,9 @@ export async function assembleTeamSnapshot(
 ): Promise<TeamActivitySnapshot> {
   const tasks = state.tasks
   const depths = taskDepthsById(tasks)
-  const byName = new Map(state.members.filter((m) => m.status !== 'removed').map((m) => [m.name, m]))
-  const activity = new Map<string, 'running' | 'inactive'>()
+  let activity = new Map<string, 'running' | 'inactive'>()
   try {
-    const children = await ctx.subagents.listChildren(state.captainSessionId as SessionId)
-    for (const entry of children) {
-      if (entry.kind === 'child') activity.set(entry.id, entry.activity)
-    }
+    activity = await memberActivity(ctx, state.captainSessionId)
   } catch (error: unknown) {
     ctx.logger.warn(`agent-teams: activity listing failed for ${state.name}: ${String(error)}`)
   }

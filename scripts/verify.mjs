@@ -35,8 +35,10 @@ import {
   installMemberSelectionRuntime,
   MEMBER_DENIED_TOOLS,
   resolveMemberLlmSelection,
+  memberActivity,
   spawnMember,
 } from '../lib/members.js'
+import { assembleTeamSnapshot } from '../lib/snapshot.js'
 import {
   FEEDBACK_LABEL,
   FEEDBACK_REPO,
@@ -263,6 +265,89 @@ check('t1 depth 0', depths.get('t1') === 0)
 check('t2 depth 1 (longest path)', depths.get('t2') === 1)
 check('t3 depth 2', depths.get('t3') === 2)
 check('missing dep contributes no depth', depths.get('t4') === 0)
+
+const activityRoot = await mkdtemp(join(tmpdir(), 'dsh-agent-teams-activity-'))
+try {
+  const activityTeam = {
+    name: 'Activity Team',
+    id: sanitizeKey('Activity Team'),
+    captainSessionId: 'sess-captain',
+    createdAt: 0,
+    members: [
+      { id: 'sess-backend', name: 'backend', role: 'backend', joinedAt: 0, status: 'idle' },
+      { id: 'sess-frontend', name: 'frontend', role: 'frontend', joinedAt: 0, status: 'idle' },
+      { id: '', name: 'unspawned', role: 'qa', joinedAt: 0, status: 'idle' },
+    ],
+    tasks: [
+      { id: 't1', subject: 'done', status: 'completed', assignee: 'backend', dependencies: [], createdAt: 0, updatedAt: 0 },
+      { id: 't2', subject: 'done', status: 'completed', assignee: 'frontend', dependencies: [], createdAt: 0, updatedAt: 0 },
+    ],
+    taskSeq: 2,
+  }
+  await createTeamDir(activityRoot, activityTeam)
+  const stoppedConversationCtx = {
+    agents: {
+      get: (id) => {
+        if (id === 'sess-backend') return { status: 'idle' }
+        if (id === 'sess-frontend') return { status: 'idle' }
+        return undefined
+      },
+    },
+    subagents: {
+      listChildren: async () => [
+        { kind: 'child', id: 'sess-backend', activity: 'running' },
+        { kind: 'child', id: 'sess-frontend', activity: 'running' },
+      ],
+    },
+    logger: { warn: () => {} },
+  }
+  const stoppedLive = await memberActivity(stoppedConversationCtx, 'sess-captain')
+  check(
+    'loaded-but-stopped member is inactive, not store-running',
+    stoppedLive.get('sess-backend') === 'inactive' && stoppedLive.get('sess-frontend') === 'inactive',
+    `got backend=${stoppedLive.get('sess-backend')} frontend=${stoppedLive.get('sess-frontend')}`,
+  )
+  const stoppedSnapshot = await assembleTeamSnapshot(
+    stoppedConversationCtx,
+    activityRoot,
+    'workspace',
+    activityTeam,
+  )
+  check(
+    'panel does not mark a stopped conversation as working',
+    stoppedSnapshot.members.every((member) => member.name === 'unspawned' || member.activity !== 'working')
+      && stoppedSnapshot.members.find((member) => member.name === 'backend')?.activity === 'idle',
+    JSON.stringify(stoppedSnapshot.members.map((member) => `${member.name}:${member.activity}`)),
+  )
+
+  const mixedCtx = {
+    agents: {
+      get: (id) => {
+        if (id === 'sess-backend') return { status: 'running' }
+        if (id === 'sess-frontend') return { status: 'idle' }
+        return undefined
+      },
+    },
+    subagents: {
+      listChildren: async () => [
+        { kind: 'child', id: 'sess-backend', activity: 'running' },
+        { kind: 'child', id: 'sess-frontend', activity: 'running' },
+        { kind: 'child', id: 'sess-cold', activity: 'inactive' },
+      ],
+    },
+    logger: { warn: () => {} },
+  }
+  const mixedLive = await memberActivity(mixedCtx, 'sess-captain')
+  check(
+    'only an agent with an active driver reports running',
+    mixedLive.get('sess-backend') === 'running'
+      && mixedLive.get('sess-frontend') === 'inactive'
+      && mixedLive.get('sess-cold') === 'inactive',
+    `got backend=${mixedLive.get('sess-backend')} frontend=${mixedLive.get('sess-frontend')} cold=${mixedLive.get('sess-cold')}`,
+  )
+} finally {
+  await rm(activityRoot, { recursive: true, force: true })
+}
 
 console.log('6/8 client relationship projections')
 const projectionTasks = [

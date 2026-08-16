@@ -26,6 +26,12 @@ README/README_ZH/docs still apply unless overridden here.
   refuse worktrees, and merge/removal stay captain-owned git operations.
   Implementation: `state.ts` pointer helpers + `members.ts` spawn path +
   `tools.ts` wiring.
+- **Turn activity, not store activity**: the panel and
+  `agent_teams_status` treat a member as working only while
+  `ctx.agents.get(id).status === 'running'`. `listChildren().activity`
+  stays `running` for any child still live in `ctx.sessions`, including
+  a stopped conversation. Implementation: `members.ts` `turnActivityOf`
+  + snapshot reuse.
 
 ## Workflow
 

@@ -443,10 +443,28 @@ export function interruptMember(ctx: Context, captain: Agent, childId: string): 
 }
 
 /**
- * Snapshot each direct continuable child's activity under the captain's
+ * Turn activity for one listed child.
+ *
+ * `listChildren().activity` is a store snapshot: `running` means the child
+ * session is still live in `ctx.sessions`, and `inactive` means it exists
+ * only in persistence. A stopped conversation stays loaded, so the panel
+ * must not treat that store bit as "the member is working". Only a live
+ * Agent whose driver is currently `running` is working; idle, ready, or
+ * missing live Agents are inactive.
+ * @param ctx - the plugin context (injects `agents`).
+ * @param childId - the child's durable session id.
+ * @returns `running` while the child is driving a turn, otherwise `inactive`.
+ */
+export function turnActivityOf(ctx: Context, childId: string): 'running' | 'inactive' {
+  return ctx.agents.get(brandedSessionId(childId))?.status === 'running' ? 'running' : 'inactive'
+}
+
+/**
+ * Snapshot each direct continuable child's turn activity under the captain's
  * session, keyed by child session id. A member that is currently running its
- * turn reports `running`; an idle member reports `inactive`.
- * @param ctx - the plugin context (injects `subagents`).
+ * turn reports `running`; a loaded-but-stopped or cold member reports
+ * `inactive`.
+ * @param ctx - the plugin context (injects `subagents` and `agents`).
  * @param captainSessionId - the captain's session id.
  * @returns child id → activity, missing entries are unknown children.
  */
@@ -457,7 +475,7 @@ export async function memberActivity(
   const entries = await ctx.subagents.listChildren(brandedSessionId(captainSessionId))
   const activity = new Map<string, 'running' | 'inactive'>()
   for (const entry of entries) {
-    if (entry.kind === 'child') activity.set(entry.id, entry.activity)
+    if (entry.kind === 'child') activity.set(entry.id, turnActivityOf(ctx, entry.id))
   }
   return activity
 }
