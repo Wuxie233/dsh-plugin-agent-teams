@@ -264,7 +264,7 @@ Conversation Node 是“事件折叠 + keyed slot renderer”的组合：
 - React root、host DOM、window listener、全局 attribute 都有 disposer。
 - 跟随 session list，按当前 owner 过滤；导航时立即收起。
 - 宽屏可让主列礼让，窄屏退回 overlay；只依赖稳定 `data-*`，不要耦合哈希 class。
-- 首屏恢复的已有活动只显示徽标，避免首次请求返回后自动展开造成大幅布局位移；稳定后出现的新活动再自动展开。
+- 默认只显示徽标；新活动也不自动展开，等用户点开。
 - 面板限制为容器/视口的一部分高度，内容区内部滚动；窄屏单独设上限。
 - 轮询使用 `no-store`、in-flight guard、响应形状校验和 unmount 防护；失败保留最后成功快照。
 - 支持键盘、`:focus-visible`、`aria-*`、Escape、reduced motion；hover/focus 只预览，click 才固定状态。

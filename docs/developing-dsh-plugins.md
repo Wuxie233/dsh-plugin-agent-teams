@@ -369,7 +369,7 @@ export function apply(ctx: ClientContext): void {
 
 - `ctx.sessions.list` 是 `ObservableSnapshot<SessionListState>`；portal 组件用 `useSyncExternalStore` 订阅。
 - portal host、React root、window/document 监听器和全局 attribute 都必须 effect-owned 并在 HMR 卸载时清理。
-- 自动展开/宽限收起要显式建模；用户导航时同步关闭，不依赖轮询延迟。
+- 面板默认收起；只在用户点开后展开。无团队时宽限收起；用户导航时同步关闭，不依赖轮询延迟。
 
 #### 3.4.1 浮层与主工作区协作
 

@@ -5,9 +5,10 @@
  * panel at the top-right corner. On wide viewports it cooperatively makes the
  * conversation column yield space; narrow viewports keep overlay mode. It
  * polls the host `/plugins/dsh-agent-teams/state` route for
- * server-side snapshots (durable files + live subagent activity), with a
- * collapsed badge that auto-expands once when activity appears. Archived
- * teams stay available for the owning conversation after live work ends.
+ * server-side snapshots (durable files + live subagent activity). The
+ * collapsed badge stays closed until the user opens it (corner pill or the
+ * conversation card). Archived teams stay available for the owning
+ * conversation after live work ends.
  *
  * The floater mounts through a body portal (no top-right slot exists in the
  * web shell); it is not a conversation node — the in-conversation panel was
@@ -32,12 +33,6 @@ import css from './ActivityPanel.module.css'
 const POLL_MS = 1000
 /** Grace before the panel collapses once no team remains. */
 const AUTOCLOSE_GRACE_MS = 2000
-/**
- * Page-settle window after mount: activity restored on page load only shows
- * the collapsed badge, so the panel never yanks the conversation column
- * right after load. New activity after this window auto-expands as usual.
- */
-const AUTO_OPEN_SETTLE_MS = 4000
 /** Host route serving team snapshots. */
 const STATE_URL = '/plugins/dsh-agent-teams/state'
 /** Root marker shared with the panel CSS while the portal is expanded. */
@@ -438,7 +433,6 @@ export function ActivityPanel({ sessionsList, openSession }: {
   const [archivedTeams, setArchivedTeams] = useState<readonly ActivityTeam[]>([])
   const [open, setOpen] = useState(false)
   const [openOwner, setOpenOwner] = useState<SessionId | undefined>()
-  const [autoOpened, setAutoOpened] = useState(false)
   const [wasActive, setWasActive] = useState(false)
   const [historic, setHistoric] = useState<ReadonlyMap<string, { data: AgentTeamsCardData; owner: string }>>(new Map())
   const current = useSyncExternalStore(
@@ -447,7 +441,6 @@ export function ActivityPanel({ sessionsList, openSession }: {
   ).current
   const currentRef = useRef(current)
   useEffect(() => { currentRef.current = current }, [current])
-  const mountedAtRef = useRef(performance.now())
   const expanded = activityPanelExpandedForSession(open, openOwner, current)
 
   // This portal survives conversation route changes. Gate expansion by its
@@ -459,7 +452,6 @@ export function ActivityPanel({ sessionsList, openSession }: {
     setOpen(false)
     setOpenOwner(undefined)
     setWasActive(false)
-    setAutoOpened(false)
   }, [current, openOwner])
 
   // The activity panel is a body portal, so announce its open state on body.
@@ -561,14 +553,6 @@ export function ActivityPanel({ sessionsList, openSession }: {
   useEffect(() => {
     if (visibleCount > 0) {
       setWasActive(true)
-      // Auto-expand only after the page-settle window: opening (and its
-      // main-column yield) right after load reads as a whole-page flicker.
-      const settled = performance.now() - mountedAtRef.current >= AUTO_OPEN_SETTLE_MS
-      if (!autoOpened && settled) {
-        setOpenOwner(current)
-        setOpen(true)
-        setAutoOpened(true)
-      }
       return
     }
     if (!wasActive) return
@@ -576,12 +560,9 @@ export function ActivityPanel({ sessionsList, openSession }: {
       setOpen(false)
       setOpenOwner(undefined)
       setWasActive(false)
-      // Re-arm auto-expand: a later activity (new team, new session) may
-      // open the panel on its own again.
-      setAutoOpened(false)
     }, AUTOCLOSE_GRACE_MS)
     return () => { clearTimeout(timer) }
-  }, [visibleCount, autoOpened, wasActive])
+  }, [visibleCount, wasActive])
 
   const busy = useMemo(
     () => visibleTeams.some((team) => team.members.some((member) => member.activity === 'working')),

@@ -92,7 +92,7 @@ dsh plugin --profile web add /absolute/path/to/<plugin>
   - headless profile 端到端：`dsh --profile headless "…"`（真实 LLM 跑通全流程）
   - 落盘/日志验证：会话日志含完整事件流（列出事件名与次数，如 `team-created ×1, member-added ×2…`）
   - UI 加载链路：浏览器名册含插件、`GET /plugins/xxx/client.js → 200`、数据路由返回形状
-  - GUI 端到端：驱动真实浏览器后的面板行为（自动展开、状态更新、收起），附截图路径
+  - GUI 端到端：驱动真实浏览器后的面板行为（默认收起、手动展开、状态更新、收起），附截图路径
 - **命令规范**：全部可直接复制（`cd /path/…` 开头、注释标注预期输出如"应看到 xxx 行"）；声明"不会触碰正在运行的 profile / 不 boot 服务"的验证要写明。
 - **原则**：0 层只写真实发生过的；1 层是开发者的自检入口；2 层留给用户在自己实例上复现——三个层次缺一不可，混写会毁掉信任。
 

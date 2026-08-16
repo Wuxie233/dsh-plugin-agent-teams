@@ -32,6 +32,9 @@ README/README_ZH/docs still apply unless overridden here.
   stays `running` for any child still live in `ctx.sessions`, including
   a stopped conversation. Implementation: `members.ts` `turnActivityOf`
   + snapshot reuse.
+- **Activity panel stays collapsed**: no auto-expand after settle or new
+  activity. The corner badge and conversation card remain the only open
+  paths.
 
 ## Workflow
 
