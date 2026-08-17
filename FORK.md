@@ -39,6 +39,12 @@ README/README_ZH/docs still apply unless overridden here.
   recipient, then delivers immediately. Captain reports use
   `cancel({ kind: 'parent' }, { keepInbox: true })` + `followup`; member
   wakes use `interrupt` + `followup`. Steering / FIFO-next-turn is gone.
+- **Teardown drops queued member work**: `agent_teams_delete` calls
+  `retireMember` (`cancel` without `keepInbox`) so stale follow-ups
+  cannot keep waking the captain after the team is archived.
+- **claimed → completed** is a legal hop; members must read
+  `agent_teams_status` every turn and must not trust the welcome
+  snapshot.
 
 ## Workflow
 

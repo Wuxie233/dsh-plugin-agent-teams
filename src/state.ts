@@ -145,7 +145,7 @@ export function unsatisfiedDependencies(tasks: TeamTask[], dependencies: string[
  */
 export const TASK_TRANSITIONS: Readonly<Record<TaskStatus, readonly TaskStatus[]>> = {
   pending: ['claimed', 'cancelled'],
-  claimed: ['in_progress', 'failed', 'cancelled'],
+  claimed: ['in_progress', 'completed', 'failed', 'cancelled'],
   in_progress: ['completed', 'failed', 'cancelled'],
   completed: [],
   failed: [],

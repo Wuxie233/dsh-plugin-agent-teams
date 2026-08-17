@@ -43,7 +43,7 @@
 
 - 表格列出**真正用到的能力**，每行"DSH 能力 → 插件用途"一句话；这是读者判断"这个插件怎么融入 DSH"的最快路径。
 - 表格后补**数据流一句话**："工具执行 → 磁盘状态（真相源）→ host 快照路由 → 浮层轮询渲染。会话日志事件继续写入（重放/审计）。"（一个方向链，不要画 ASCII 大图。）
-- **状态机一句话**："任务状态机：`pending → claimed → in_progress → completed | failed | cancelled`，状态迁移在白名单内校验。"（能一句话压缩的状态机绝不用多段。）
+- **状态机一句话**："任务状态机：`pending → claimed → in_progress | completed | failed | cancelled`，`in_progress` 可省略，状态迁移在白名单内校验。"（能一句话压缩的状态机绝不用多段。）
 - 需要引用文件时只给**入口路径**（如 `src/snapshot.ts`），不贴代码。
 - **避免**：架构图（ASCII/plantuml）、实现细节堆砌（锁、队列、重试策略）、重复仓库 AGENTS.md 已有的通用机制解释。
 

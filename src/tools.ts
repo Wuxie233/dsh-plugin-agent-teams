@@ -40,6 +40,7 @@ import {
   interruptMember,
   memberActivity,
   resolveMemberLlmSelection,
+  retireMember,
   spawnMember,
   type MemberRuntimeConfig,
 } from './members.ts'
@@ -561,7 +562,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
 
   ctx.tools.register(defineTool({
     name: 'agent_teams_update_task',
-    description: 'Update a task\'s status and/or write its output. Transitions: claimed → in_progress → completed|failed|cancelled (pending may also be cancelled). The captain may update any task; a member may only update tasks assigned to it. Set output when completing or failing a task.',
+    description: 'Update a task\'s status and/or write its output. Transitions: claimed → in_progress|completed|failed|cancelled, and in_progress → completed|failed|cancelled (pending may also be cancelled). The captain may update any task; a member may only update tasks assigned to it. Set output when completing or failing a task.',
     parameters: {
       task_id: { type: 'string', required: true, description: 'The task id to update.' },
       status: {
@@ -861,7 +862,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
 
   ctx.tools.register(defineTool({
     name: 'agent_teams_delete',
-    description: 'End your team: interrupts all members (best effort) and deletes the team\'s state directory (team file, tasks, mailboxes). Use when the team\'s work is done or abandoned.',
+    description: 'End your team: stops every member, drops their queued follow-ups, and archives the team\'s state directory (team file, tasks, mailboxes). Use when the team\'s work is done or abandoned.',
     parameters: {},
     output: {
       schema: {
@@ -885,7 +886,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
       await withTeamLock(teamLockKey(stateRoot, team.id), async () => {
         const fresh = await requireFreshCaptainTeam(stateRoot, team.id, captain.id)
         for (const member of fresh.members) {
-          if (member.status !== 'removed' && member.id !== '') interruptMember(ctx, captain, member.id)
+          if (member.status !== 'removed' && member.id !== '') retireMember(ctx, member.id)
         }
         appendTeamEvent(ctx, captainSessionOf(ctx, fresh.captainSessionId, captain.session), 'agent-teams/team-deleted', {
           teamId: fresh.id,

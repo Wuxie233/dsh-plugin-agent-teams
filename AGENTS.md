@@ -19,6 +19,8 @@
   badge or conversation card). Do not reintroduce auto-expand.
 - Live team messages barge in. Do not route captain reports through
   `steer()` or member wakes through a queued followup without interrupt.
+- `agent_teams_delete` must retire members (`cancel` without keepInbox),
+  not only interrupt the current turn. claimed → completed is legal.
 - Panel/status "working" is turn activity, not `listChildren().activity`.
   The store bit is `running` whenever the child session is still live in
   `ctx.sessions`; a stopped conversation stays loaded. `memberActivity`

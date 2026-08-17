@@ -38,7 +38,7 @@
     └── <member>.jsonl   # 每个成员一个邮箱（JSONL）
 ```
 
-任务状态机：`pending → claimed → in_progress → completed | failed | cancelled`；迁移白名单校验；领取前校验依赖（未完成依赖报错列出）。
+任务状态机：`pending → claimed → in_progress | completed | failed | cancelled`，`in_progress` 可省略；迁移白名单校验；领取前校验依赖（未完成依赖报错列出）。
 
 ## 工具一览
 
@@ -52,7 +52,7 @@
 | `agent_teams_update_task` | 推进任务状态并写入 `output` 结果 |
 | `agent_teams_send_message` | 任意成员→任意成员/队长：消息直达对方邮箱并插嘴投递（打断当前轮次后立刻开始；无队长转发；拒绝冒名 `from`） |
 | `agent_teams_status` | 团队全景：成员活动、任务清单、队长邮箱、各成员待读消息 |
-| `agent_teams_delete` | 结束团队：打断成员，团队目录**归档保留**（任务与依赖图、邮箱完整留存） |
+| `agent_teams_delete` | 结束团队：打断成员并清空其排队消息，团队目录**归档保留**（任务与依赖图、邮箱完整留存） |
 | `agent_teams_report_issue` | 队长或未建队会话把插件缺陷报到 `Wuxie233/dsh-plugin-agent-teams`；成员不可见也不可用 |
 
 `agent_teams_add_member` 默认不需要模型参数：它会快照队长当前请求真正生效的 LLM provider、model 与思考强度。用户明确要求某个角色使用其他模型时，可以同时传入可选的 `provider` + `model`；只覆盖 `model` 时沿用队长当前 LLM provider。插件不会为每个成员发起二次选择或弹窗，也不暴露逐成员思考强度参数。

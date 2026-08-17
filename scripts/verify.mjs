@@ -37,6 +37,9 @@ import {
   MEMBER_DENIED_TOOLS,
   resolveMemberLlmSelection,
   memberActivity,
+  memberPersona,
+  memberWelcome,
+  retireMember,
   spawnMember,
 } from '../lib/members.js'
 import { assembleTeamSnapshot } from '../lib/snapshot.js'
@@ -129,6 +132,7 @@ check(
 )
 check('pending -> claimed allowed', transitionError('pending', 'claimed') === undefined)
 check('pending -> in_progress denied', transitionError('pending', 'in_progress') !== undefined)
+check('claimed -> completed allowed', transitionError('claimed', 'completed') === undefined)
 check('in_progress -> completed allowed', transitionError('in_progress', 'completed') === undefined)
 check('completed -> in_progress denied', transitionError('completed', 'in_progress') !== undefined)
 check('same status is a no-op', transitionError('failed', 'failed') === undefined)
@@ -438,6 +442,48 @@ check(
     && memberInterrupts[0]?.id === 'sess-backend'
     && memberFollowups.length === 1
     && memberFollowups[0]?.id === 'sess-backend',
+)
+
+const welcome = memberWelcome({
+  name: 'marketplace-shelf',
+  id: 'marketplace-shelf',
+  captainSessionId: 'sess-captain',
+  createdAt: 0,
+  members: [],
+  tasks: [{ id: 't1', subject: 'shelf', status: 'claimed', assignee: 'catalog-engineer', dependencies: [], createdAt: 0, updatedAt: 0 }],
+  taskSeq: 1,
+})
+check(
+  'welcome message does not invent a zero-task snapshot',
+  !welcome.includes('0 task') && !welcome.includes('none assigned'),
+  welcome,
+)
+const persona = memberPersona(
+  { name: 'shelf', id: 'shelf', captainSessionId: 'c', createdAt: 0, members: [], tasks: [], taskSeq: 0 },
+  { id: 'sess-catalog', name: 'catalog-engineer', role: 'engineer', joinedAt: 0, status: 'idle' },
+  '.agent-teams',
+)
+check(
+  'member persona requires a live status read every turn',
+  persona.includes('agent_teams_status at the start of every turn')
+    && persona.includes('complete a claimed task directly'),
+)
+
+const retired = []
+retireMember(
+  {
+    agents: {
+      get: (id) => id === 'sess-backend'
+        ? { cancel: (cause, options) => retired.push({ cause, options }) }
+        : undefined,
+    },
+    logger: { warn: () => {} },
+  },
+  'sess-backend',
+)
+check(
+  'retiring a deleted-team member cancels the turn and drops the queued inbox',
+  retired.length === 1 && retired[0]?.cause?.kind === 'parent' && retired[0]?.options === undefined,
 )
 
 console.log('7/8 member model selection and continuation restore')

@@ -268,20 +268,24 @@ Team context:
 - The captain and your teammates reach you through messages. Each message you receive is a new turn: act on it and end your turn with a concise reply.
 
 Working rules:
-1. When the captain assigns you a task, call agent_teams_claim_task with the task id to claim it, then agent_teams_update_task (status=in_progress) once you start working.
-2. Work thoroughly with your available tools; do not cut corners.
-3. When finished, call agent_teams_update_task with status=completed and a concise \`output\` summarizing what you did and the key results.
-4. Send a short report to the captain with agent_teams_send_message (to=captain) when you complete a task or hit a blocker.
-5. To ask a teammate something, use agent_teams_send_message with to=<teammate name>; the message lands in their mailbox and wakes them directly — teammates talk to each other without the captain in the loop. The same applies to the captain (to=captain).
-6. You are a worker: do not create or delete teams, and do not add or remove members — that is the captain's job.${isReadOnlyRole(member.role, readOnlyRoles) ? `\n${readOnlyPersonaRule()}` : ''}`
+1. Call agent_teams_status at the start of every turn. That snapshot is the only source of truth for your tasks. Do not trust this persona, a welcome message, or an earlier turn if they disagree with the live status.
+2. When a message names a task id, claim it if needed (agent_teams_claim_task) and work it. You may complete a claimed task directly (status=completed + output); in_progress is optional.
+3. Work thoroughly with your available tools; do not cut corners.
+4. When finished, call agent_teams_update_task with status=completed and a concise \`output\` summarizing what you did and the key results.
+5. Send a short report to the captain with agent_teams_send_message (to=captain) when you complete a task or hit a blocker.
+6. To ask a teammate something, use agent_teams_send_message with to=<teammate name>; the message barges into their current turn. The same applies to the captain (to=captain).
+7. You are a worker: do not create or delete teams, and do not add or remove members — that is the captain's job.
+8. If agent_teams_status says you do not belong to an active team, stop. Do not keep reporting old blockers.${isReadOnlyRole(member.role, readOnlyRoles) ? `\n${readOnlyPersonaRule()}` : ''}`
 }
 
 /**
  * The initial user message delivered when the member is created.
+ * It must not invent a task count or assignment snapshot; those change
+ * after spawn and would make the member ignore later claimed work.
  * @param team - the team the member joined.
  */
 export function memberWelcome(team: TeamState): string {
-  return `You have joined the team "${team.name}" as a member. The captain will send you tasks and messages; wait for instructions. Current team status: ${team.tasks.length} task(s), none assigned to you yet.`
+  return `You have joined the team "${team.name}" as a member. Wait for the captain. At the start of every turn, call agent_teams_status and act on that live snapshot — do not assume you have zero tasks.`
 }
 
 /**
@@ -443,6 +447,22 @@ export function interruptMember(ctx: Context, captain: Agent, childId: string): 
     ctx.subagents.interrupt(brandedSessionId(childId), { kind: 'ancestor', agent: captain })
   } catch (error: unknown) {
     ctx.logger.warn(`agent-teams: interrupt of member ${childId} failed: ${String(error)}`)
+  }
+}
+
+/**
+ * Stop a member and drop every queued follow-up so stale team messages
+ * cannot keep waking it after teardown.
+ * @param ctx - the plugin context (injects `agents`).
+ * @param childId - the member's durable child session id.
+ */
+export function retireMember(ctx: Context, childId: string): void {
+  const live = ctx.agents.get(brandedSessionId(childId))
+  if (live === undefined) return
+  try {
+    live.cancel({ kind: 'parent' })
+  } catch (error: unknown) {
+    ctx.logger.warn(`agent-teams: retire of member ${childId} failed: ${String(error)}`)
   }
 }
 
