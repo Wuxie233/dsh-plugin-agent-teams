@@ -17,6 +17,8 @@
 - Host-half changes need a dsh web restart; client-half only a page refresh.
 - The activity panel stays collapsed until the user opens it (corner
   badge or conversation card). Do not reintroduce auto-expand.
+- Live team messages barge in. Do not route captain reports through
+  `steer()` or member wakes through a queued followup without interrupt.
 - Panel/status "working" is turn activity, not `listChildren().activity`.
   The store bit is `running` whenever the child session is still live in
   `ctx.sessions`; a stopped conversation stays loaded. `memberActivity`

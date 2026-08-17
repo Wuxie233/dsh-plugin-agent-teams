@@ -4,7 +4,7 @@
  *
  * Members are durable continuable subagents of the captain, so a member keeps
  * its conversation across turns and across harness restarts: the captain
- * wakes it with {@link ctx.subagents.followup}, it works through its turn
+ * barges in with {@link deliverToMember}, it works through its turn
  * (updating team state through the `agent_teams_*` tools), and becomes idle
  * again. Its final assistant message is not readable programmatically, so the
  * member persists its report into the captain's mailbox and the task records,
@@ -392,15 +392,18 @@ export async function spawnMember(
 }
 
 /**
- * Deliver one message to a member as its next FIFO turn. Best effort: a
- * failure (member gone or not continuable) is logged and reported as `false`
- * so the caller can decide (mailbox delivery still happened).
+ * Deliver one message by barging into the member's current turn.
+ *
+ * A running member is interrupted first (`keepInbox`) so the new message
+ * starts immediately instead of waiting behind the current turn. Best
+ * effort: a failure (member gone or not continuable) is logged and
+ * reported as `false` so the caller can decide (mailbox delivery still
+ * happened).
  *
  * Any team sender can route through this helper: the captain is the direct
  * parent of every member, and the caller passes the captain's live Agent
  * (its own when the captain calls, the registry-resolved one when a member
- * sends) — mirroring the Claude Code mailbox model where the writer writes
- * the target's inbox and the target picks it up on its own.
+ * sends).
  * @param ctx - the plugin context (injects `subagents`).
  * @param captain - the exact live captain agent (the member's direct parent).
  * @param childId - the member's durable child session id.
@@ -415,6 +418,7 @@ export async function deliverToMember(
   text: string,
   signal: AbortSignal,
 ): Promise<boolean> {
+  interruptMember(ctx, captain, childId)
   try {
     await ctx.subagents.followup(captain, brandedSessionId(childId), [{ type: 'text', text }], {
       source: { kind: 'plugin', plugin: 'dsh-agent-teams' },

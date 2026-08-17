@@ -175,16 +175,20 @@ function requireTask(team: TeamState, taskId: string): TeamTask {
 }
 
 /**
- * Deliver a durable member report at the captain's nearest model boundary.
+ * Barge a durable member report into the live captain immediately.
  *
- * `Agent.steer()` targets the next step while the captain is running, wakes a
- * new turn when it is idle, and lets the Agent runtime reclassify an aborted
- * activity to `next-turn`. This prevents reports from waiting behind the
- * captain's entire orchestration turn.
+ * A running captain is cancelled first (`keepInbox`) so the report starts a
+ * new turn instead of waiting at the next step or behind the current
+ * orchestration turn. An idle captain just receives the follow-up.
  */
-export function steerCaptainReport(captain: Pick<Agent, 'steer'>, from: string, content: string): boolean {
+export function bargeCaptainReport(
+  captain: Pick<Agent, 'cancel' | 'followup'>,
+  from: string,
+  content: string,
+): boolean {
   try {
-    captain.steer(createUserMessage({
+    captain.cancel({ kind: 'parent' }, { keepInbox: true })
+    captain.followup(createUserMessage({
       content: [{ type: 'text', text: `AgentTeams message from member ${from}:\n\n${content}` }],
       source: { kind: 'plugin', plugin: 'dsh-agent-teams' },
     }))
@@ -621,7 +625,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
 
   ctx.tools.register(defineTool({
     name: 'agent_teams_send_message',
-    description: 'Send a message to the captain or to a teammate. Messages go straight into the recipient\'s mailbox; when the captain agent is online the plugin also schedules live delivery (member recipients get the message as their next turn; a running captain sees it at the nearest model step). No relay is involved: teammates talk to each other directly, exactly like the Claude Code AgentTeams mailbox model.',
+    description: 'Send a message to the captain or to a teammate. Messages go straight into the recipient\'s mailbox; live delivery barges in — a running recipient is interrupted and the message starts immediately instead of waiting behind the current turn. No relay is involved: teammates talk to each other directly, exactly like the Claude Code AgentTeams mailbox model.',
     parameters: {
       to: { type: 'string', required: true, description: 'Recipient: "captain" or a member name.' },
       content: { type: 'string', required: true, description: 'The message text.' },
@@ -635,7 +639,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           message_id: { type: 'string', required: true },
           from: { type: 'string', required: true },
           to: { type: 'string', required: true },
-          delivered: { type: 'string', required: true, description: 'live (accepted by the live captain), wake (member recipient woken), or mailbox (durable inbox only).' },
+          delivered: { type: 'string', required: true, description: 'live (barged into the live captain), wake (barged into the member), or mailbox (durable inbox only).' },
         },
       },
       render: (args, value) => [{
@@ -690,7 +694,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
       if (prepared.kind === 'captain') {
         let delivered: 'live' | 'mailbox' = 'mailbox'
         if (captain !== undefined && prepared.identity.kind === 'member') {
-          delivered = steerCaptainReport(captain, prepared.from, args.content) ? 'live' : 'mailbox'
+          delivered = bargeCaptainReport(captain, prepared.from, args.content) ? 'live' : 'mailbox'
         }
         return { message_id: prepared.message.id, from: prepared.from, to: CAPTAIN_KEY, delivered }
       }

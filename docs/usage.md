@@ -10,7 +10,7 @@
 |---|---|
 | `ctx.tools` 注册表 | 注册 10 个 `agent_teams_*` 工具（与 `tool-workflow` 同一注册路径） |
 | `ctx.subagents.startContinuable()` | 创建成员：durable 可续聊子代理，带成员 persona |
-| `ctx.subagents.followup()` | 唤醒收件成员（消息进入其下一轮次） |
+| `ctx.subagents.interrupt()` + `followup()` / `Agent.cancel()` + `followup()` | 插嘴投递：先打断收件人当前轮次，再立刻投递新消息 |
 | `ctx.subagents.listChildren()` + `ctx.agents.get().status` | 查询成员是否正在跑一轮（store 里的 `running` 只表示会话还在内存，停掉的对话仍可能是 `running`） |
 | `ctx.systemPrompt.section()` | 注册"AgentTeams 使用策略"提示段 |
 | Web server 路由注册 | 活动面板数据路由 `/plugins/dsh-agent-teams/state` + 鲸鱼图片静态服务（`webServer`/`httpServer` 双键兼容，见下） |
@@ -50,7 +50,7 @@
 | `agent_teams_create_task` | 创建任务，支持 `dependencies` 依赖声明与 `assignee` 指派 |
 | `agent_teams_claim_task` | 领取任务（校验依赖；队长可代领，成员只能领自己的/未指派的） |
 | `agent_teams_update_task` | 推进任务状态并写入 `output` 结果 |
-| `agent_teams_send_message` | 任意成员→任意成员/队长：消息直达对方邮箱并唤醒对方（无队长转发；拒绝冒名 `from`） |
+| `agent_teams_send_message` | 任意成员→任意成员/队长：消息直达对方邮箱并插嘴投递（打断当前轮次后立刻开始；无队长转发；拒绝冒名 `from`） |
 | `agent_teams_status` | 团队全景：成员活动、任务清单、队长邮箱、各成员待读消息 |
 | `agent_teams_delete` | 结束团队：打断成员，团队目录**归档保留**（任务与依赖图、邮箱完整留存） |
 | `agent_teams_report_issue` | 队长或未建队会话把插件缺陷报到 `Wuxie233/dsh-plugin-agent-teams`；成员不可见也不可用 |
@@ -77,11 +77,11 @@
 
 ## 使用协议
 
-插件提示段会指导模型按协议执行：建团队 → 拆任务并声明依赖 → 按角色拉成员（需要写隔离时先建 worktree 再加人）→ 领取并唤醒成员 → 轮询 `agent_teams_status` 收集产出 → 汇报后 `agent_teams_delete`。成员之间可以直接互发消息（`agent_teams_send_message` 直达对方邮箱并唤醒对方），无需队长中转。
+插件提示段会指导模型按协议执行：建团队 → 拆任务并声明依赖 → 按角色拉成员（需要写隔离时先建 worktree 再加人）→ 领取并插嘴投递给成员 → 轮询 `agent_teams_status` 收集产出 → 汇报后 `agent_teams_delete`。成员之间可以直接互发消息（`agent_teams_send_message` 直达对方邮箱并插嘴投递），无需队长中转。
 
 ## 已知限制
 
-- 成员在收到消息（被唤醒）后才行动，没有常驻轮询；队长离线时消息留在邮箱、待队长下次操作时投递。
+- 成员在收到消息后才行动，没有常驻轮询。在线投递会打断收件人当前轮次再立刻开始新一轮；队长离线时消息留在邮箱、待下次在线时投递。
 - 一个队长同时只能带一个团队（与 Claude Code AgentTeams 一致）。
 - 成员 persona 替换部署默认 persona。写者默认拥有完整工具集；只读角色在 spawn 时被拒绝 `write` / `edit` / `bash`。
 - 可选成员 worktree 依赖本机打过 cwd 缝的 runtime；缝没打上时 spawn 会 fail loud 并打断该成员，不会静默写回队长树。deployment 的 `pnpm install` 会冲掉这份缝。

@@ -35,6 +35,10 @@ README/README_ZH/docs still apply unless overridden here.
 - **Activity panel stays collapsed**: no auto-expand after settle or new
   activity. The corner badge and conversation card remain the only open
   paths.
+- **Barge-in delivery**: `agent_teams_send_message` interrupts a running
+  recipient, then delivers immediately. Captain reports use
+  `cancel({ kind: 'parent' }, { keepInbox: true })` + `followup`; member
+  wakes use `interrupt` + `followup`. Steering / FIFO-next-turn is gone.
 
 ## Workflow
 

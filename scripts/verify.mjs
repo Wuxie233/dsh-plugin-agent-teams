@@ -30,8 +30,9 @@ import {
 } from '../lib/state.js'
 import { activityPanelExpandedForSession, relatedTaskIds, taskStages } from '../lib/client/activity-model.js'
 import { parseAgentTeamsCreateArgs } from '../lib/client/agent-teams-card-definition.js'
-import { steerCaptainReport } from '../lib/tools.js'
+import { bargeCaptainReport } from '../lib/tools.js'
 import {
+  deliverToMember,
   installMemberSelectionRuntime,
   MEMBER_DENIED_TOOLS,
   resolveMemberLlmSelection,
@@ -385,21 +386,58 @@ check(
 check('malformed create tool arguments do not create a card', parseAgentTeamsCreateArgs('{bad') === undefined)
 
 const captainDeliveries = []
-const captainSteered = steerCaptainReport(
-  { steer: message => captainDeliveries.push(message) },
+const captainCancels = []
+const captainBarged = bargeCaptainReport(
+  {
+    cancel: (cause, options) => captainCancels.push({ cause, options }),
+    followup: message => captainDeliveries.push(message),
+  },
   'alice',
   'finished t1',
 )
 check(
-  'member report delivery calls the live captain steer API',
-  captainSteered
+  'member report barges into the live captain instead of steering the next step',
+  captainBarged
+    && captainCancels.length === 1
+    && captainCancels[0]?.cause?.kind === 'parent'
+    && captainCancels[0]?.options?.keepInbox === true
     && captainDeliveries.length === 1
     && captainDeliveries[0]?.content[0]?.type === 'text'
     && captainDeliveries[0]?.content[0]?.text === 'AgentTeams message from member alice:\n\nfinished t1',
 )
 check(
   'failed live captain delivery falls back to the durable mailbox',
-  steerCaptainReport({ steer: () => { throw new Error('offline') } }, 'alice', 'finished t1') === false,
+  bargeCaptainReport({
+    cancel: () => {},
+    followup: () => { throw new Error('offline') },
+  }, 'alice', 'finished t1') === false,
+)
+
+const memberFollowups = []
+const memberInterrupts = []
+const memberAccepted = await deliverToMember(
+  {
+    subagents: {
+      interrupt: (id, authority) => memberInterrupts.push({ id, authority }),
+      followup: async (_captain, id, content) => {
+        memberFollowups.push({ id, content })
+        return 'msg-1'
+      },
+    },
+    logger: { warn: () => {} },
+  },
+  { id: 'captain' },
+  'sess-backend',
+  'stop and do t2',
+  new AbortController().signal,
+)
+check(
+  'member delivery interrupts the current turn before followup',
+  memberAccepted
+    && memberInterrupts.length === 1
+    && memberInterrupts[0]?.id === 'sess-backend'
+    && memberFollowups.length === 1
+    && memberFollowups[0]?.id === 'sess-backend',
 )
 
 console.log('7/8 member model selection and continuation restore')
