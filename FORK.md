@@ -43,8 +43,9 @@ README/README_ZH/docs still apply unless overridden here.
   `retireMember` (`cancel` without `keepInbox`) so stale follow-ups
   cannot keep waking the captain after the team is archived.
 - **claimed → completed** is a legal hop; members must read
-  `agent_teams_status` every turn and must not trust the welcome
-  snapshot.
+  `agent_teams_status` every turn.
+- **No greeting turn**: `agent_teams_add_member` requires the first
+  task subject and prompt. That prompt is the spawn user message.
 
 ## Workflow
 

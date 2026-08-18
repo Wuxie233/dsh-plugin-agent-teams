@@ -22,7 +22,7 @@ import { existsSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { readTeamSync, resolveTeamWorkspace, writeCaptainPointer } from './state.ts'
 import { isReadOnlyRole, READ_ONLY_DENY_TOOLS, readOnlyPersonaRule } from './roles.ts'
-import type { TeamMember, TeamState } from './types.ts'
+import type { TeamMember, TeamState, TeamTask } from './types.ts'
 
 /** Captain-only AgentTeams tools hidden from newly spawned members. */
 export const MEMBER_DENIED_TOOLS = [
@@ -268,8 +268,8 @@ Team context:
 - The captain and your teammates reach you through messages. Each message you receive is a new turn: act on it and end your turn with a concise reply.
 
 Working rules:
-1. Call agent_teams_status at the start of every turn. That snapshot is the only source of truth for your tasks. Do not trust this persona, a welcome message, or an earlier turn if they disagree with the live status.
-2. When a message names a task id, claim it if needed (agent_teams_claim_task) and work it. You may complete a claimed task directly (status=completed + output); in_progress is optional.
+1. Call agent_teams_status at the start of every turn. That snapshot is the only source of truth for your tasks. Do not trust this persona or an earlier turn if they disagree with the live status.
+2. Your first user message is already the first assigned task. Work that task. Later turns come from agent_teams_send_message. You may complete a claimed task directly (status=completed + output); in_progress is optional.
 3. Work thoroughly with your available tools; do not cut corners.
 4. When finished, call agent_teams_update_task with status=completed and a concise \`output\` summarizing what you did and the key results.
 5. Send a short report to the captain with agent_teams_send_message (to=captain) when you complete a task or hit a blocker.
@@ -280,12 +280,23 @@ Working rules:
 
 /**
  * The initial user message delivered when the member is created.
- * It must not invent a task count or assignment snapshot; those change
- * after spawn and would make the member ignore later claimed work.
+ * This is the first work turn, not a greeting: the runtime requires a
+ * prompt at spawn, so the captain supplies the first assigned task here.
  * @param team - the team the member joined.
+ * @param task - the claimed first task.
+ * @param brief - captain instructions for that task.
  */
-export function memberWelcome(team: TeamState): string {
-  return `You have joined the team "${team.name}" as a member. Wait for the captain. At the start of every turn, call agent_teams_status and act on that live snapshot — do not assume you have zero tasks.`
+export function memberDispatchPrompt(team: TeamState, task: TeamTask, brief: string): string {
+  const description = task.description === undefined || task.description === ''
+    ? ''
+    : `\nDescription: ${task.description}`
+  return `You have joined the team "${team.name}" as ${task.assignee ?? 'a member'}.
+Your first turn is task ${task.id}: ${task.subject}.${description}
+
+Captain brief:
+${brief}
+
+Call agent_teams_status, then do this task. Do not send a ready check-in.`
 }
 
 /**
@@ -300,6 +311,8 @@ export function memberWelcome(team: TeamState): string {
  * @param member - the member draft whose `id` is filled on success.
  * @param stateDir - configured state directory (for the persona).
  * @param signal - caller cancellation, forwarded to the start.
+ * @param firstTask - the claimed first task that becomes the spawn prompt.
+ * @param brief - captain instructions delivered as the first user message.
  * @param worktree - optional absolute git worktree the member is spawned
  *   inside for write isolation; read-only roles refuse it.
  */
@@ -313,6 +326,8 @@ export async function spawnMember(
   member: TeamMember,
   stateDir: string,
   signal: AbortSignal,
+  firstTask: TeamTask,
+  brief: string,
   worktree?: string,
 ): Promise<void> {
   // Fail loud at the first use: provider registration is a sibling plugin's
@@ -355,7 +370,7 @@ export async function spawnMember(
     provider: config.provider,
     label,
     request: {
-      prompt: [{ type: 'text', text: memberWelcome(team) }],
+      prompt: [{ type: 'text', text: memberDispatchPrompt(team, firstTask, brief) }],
       parent: captain,
       persona: memberPersona(
         team,

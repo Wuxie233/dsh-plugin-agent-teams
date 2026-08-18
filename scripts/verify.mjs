@@ -37,8 +37,8 @@ import {
   MEMBER_DENIED_TOOLS,
   resolveMemberLlmSelection,
   memberActivity,
+  memberDispatchPrompt,
   memberPersona,
-  memberWelcome,
   retireMember,
   spawnMember,
 } from '../lib/members.js'
@@ -444,19 +444,28 @@ check(
     && memberFollowups[0]?.id === 'sess-backend',
 )
 
-const welcome = memberWelcome({
-  name: 'marketplace-shelf',
-  id: 'marketplace-shelf',
-  captainSessionId: 'sess-captain',
+const firstTask = {
+  id: 't1',
+  subject: 'Build identity',
+  description: 'Write the identity module.',
+  status: 'claimed',
+  assignee: 'identity-builder',
+  dependencies: [],
   createdAt: 0,
-  members: [],
-  tasks: [{ id: 't1', subject: 'shelf', status: 'claimed', assignee: 'catalog-engineer', dependencies: [], createdAt: 0, updatedAt: 0 }],
-  taskSeq: 1,
-})
+  updatedAt: 0,
+}
+const dispatch = memberDispatchPrompt(
+  { name: 'firefox-majors', id: 'firefox-majors', captainSessionId: 'sess-captain', createdAt: 0, members: [], tasks: [firstTask], taskSeq: 1 },
+  firstTask,
+  'Implement t1 now. Do not check in ready.',
+)
 check(
-  'welcome message does not invent a zero-task snapshot',
-  !welcome.includes('0 task') && !welcome.includes('none assigned'),
-  welcome,
+  'spawn prompt is the first claimed task, not a greeting',
+  dispatch.includes('task t1: Build identity')
+    && dispatch.includes('Implement t1 now')
+    && dispatch.includes('Do not send a ready check-in')
+    && !dispatch.includes('Wait for the captain'),
+  dispatch,
 )
 const persona = memberPersona(
   { name: 'shelf', id: 'shelf', captainSessionId: 'c', createdAt: 0, members: [], tasks: [], taskSeq: 0 },
@@ -464,8 +473,8 @@ const persona = memberPersona(
   '.agent-teams',
 )
 check(
-  'member persona requires a live status read every turn',
-  persona.includes('agent_teams_status at the start of every turn')
+  'member persona treats the first user message as the first task',
+  persona.includes('first user message is already the first assigned task')
     && persona.includes('complete a claimed task directly'),
 )
 
@@ -586,12 +595,19 @@ await spawnMember(
   spawnMemberRecord,
   '.agent-teams',
   new AbortController().signal,
+  firstTask,
+  'Implement t1 now.',
 )
 check(
   '#20: spawn receives the resolved per-member provider and model',
   startSpec?.request?.agentOptions?.provider === 'other-provider'
     && startSpec?.request?.agentOptions?.model === 'other-model'
     && spawnMemberRecord.id === 'spawned-member',
+)
+check(
+  'spawn prompt carries the first task brief',
+  String(startSpec?.request?.prompt?.[0]?.text ?? '').includes('task t1: Build identity')
+    && String(startSpec?.request?.prompt?.[0]?.text ?? '').includes('Implement t1 now.'),
 )
 check(
   'spawn denies the captain-only report tool',
@@ -866,6 +882,8 @@ try {
     wtMember,
     '.agent-teams',
     new AbortController().signal,
+    firstTask,
+    'Implement t1 now.',
     worktreePath,
   )
   check(
@@ -895,6 +913,8 @@ try {
     memberDraft,
     '.agent-teams',
     new AbortController().signal,
+    firstTask,
+    'Implement t1 now.',
     worktreeArg,
   )
 
@@ -942,6 +962,8 @@ try {
       { id: '', name: 'silent', role: 'engineer', joinedAt: Date.now(), status: 'idle' },
       '.agent-teams',
       new AbortController().signal,
+      firstTask,
+      'Implement t1 now.',
       worktreePath,
     )
   } catch (error) {

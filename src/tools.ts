@@ -273,10 +273,19 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
 
   ctx.tools.register(defineTool({
     name: 'agent_teams_add_member',
-    description: 'Add a durable continuable member. By default it snapshots the captain\'s current LLM provider, model, and reasoning effort with no user prompt. Supply provider/model only for an explicitly requested role-specific route. The member waits for messages, works on assigned tasks, and can message the team.',
+    description: 'Add a durable continuable member and start its first claimed task in the same call. The spawn prompt is that first task, not a greeting. By default it snapshots the captain\'s current LLM provider, model, and reasoning effort. Supply provider/model only for an explicitly requested role-specific route.',
     parameters: {
       name: { type: 'string', required: true, description: 'Unique member name inside the team.' },
       role: { type: 'string', description: 'Role of the member (e.g. researcher, engineer, reviewer).' },
+      task_subject: { type: 'string', required: true, description: 'Brief title for the member\'s first task.' },
+      task_description: { type: 'string', description: 'What the first task needs done.' },
+      prompt: { type: 'string', required: true, description: 'First-turn instructions. This is the member\'s first user message; do not send a separate welcome.' },
+      task_id: { type: 'string', description: 'Existing pending task to claim as the first task. Omit to create one from task_subject.' },
+      dependencies: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Task ids the new first task depends on. Ignored when task_id is set.',
+      },
       provider: { type: 'string', description: 'Optional LLM provider route. Use only when the user explicitly requests a different provider; requires model.' },
       model: { type: 'string', description: 'Optional model override. Omit for the captain\'s current model (or the configured memberModel default).' },
       worktree: { type: 'string', description: 'Optional absolute path of an existing git worktree the captain created (git worktree add). The member is spawned inside it for write isolation; read-only roles refuse it. Merging and removing the worktree stay captain-owned git operations.' },
@@ -293,11 +302,13 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           reasoning_effort: { type: 'string' },
           worktree: { type: 'string' },
           status: { type: 'string', required: true },
+          task_id: { type: 'string', required: true },
+          task_status: { type: 'string', required: true },
         },
       },
       render: (args, value) => [{
         type: 'text',
-        text: `Member "${value.member_name}" added (subagent id ${value.member_id}, ${value.provider}/${value.model}${value.reasoning_effort === undefined ? '' : `, reasoning ${value.reasoning_effort}`}${value.worktree === undefined ? '' : `, worktree ${value.worktree}`}, status ${value.status}).`,
+        text: `Member "${value.member_name}" added (subagent id ${value.member_id}, ${value.provider}/${value.model}${value.reasoning_effort === undefined ? '' : `, reasoning ${value.reasoning_effort}`}${value.worktree === undefined ? '' : `, worktree ${value.worktree}`}, status ${value.status}). First task ${value.task_id} is ${value.task_status}.`,
       }],
     },
     async execute(args, exec) {
@@ -324,6 +335,51 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           model: args.model,
           defaultModel: config.memberModel,
         }, exec.signal)
+        const brief = args.prompt.trim()
+        if (brief === '') throw new Error('prompt must not be empty — the first turn is the first assigned task')
+        const subject = args.task_subject.trim()
+        if (subject === '') throw new Error('task_subject must not be empty')
+        let createdFirstTask = false
+        let firstTask = args.task_id === undefined ? undefined : requireTask(fresh, args.task_id)
+        if (firstTask === undefined) {
+          const dependencies = args.dependencies ?? []
+          for (const dependency of dependencies) {
+            if (!fresh.tasks.some((task) => task.id === dependency)) {
+              throw new Error(`dependency "${dependency}" does not exist in team "${fresh.name}"`)
+            }
+          }
+          firstTask = {
+            id: `t${fresh.taskSeq + 1}`,
+            subject,
+            ...args.task_description === undefined ? {} : { description: args.task_description },
+            status: 'pending',
+            assignee: memberName,
+            dependencies,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          }
+          fresh.taskSeq += 1
+          fresh.tasks.push(firstTask)
+          createdFirstTask = true
+        } else {
+          if (firstTask.assignee !== undefined && firstTask.assignee !== memberName) {
+            throw new Error(`task ${firstTask.id} is assigned to "${firstTask.assignee}", not "${memberName}"`)
+          }
+          if (firstTask.status !== 'pending' && firstTask.status !== 'claimed') {
+            throw new Error(`task ${firstTask.id} cannot start a new member from status "${firstTask.status}"`)
+          }
+          firstTask.assignee = memberName
+        }
+        const pending = unsatisfiedDependencies(fresh.tasks, firstTask.dependencies)
+        if (pending.length > 0) {
+          throw new Error(`task ${firstTask.id} is blocked by unfinished dependencies: ${pending.join(', ')} — complete them first`)
+        }
+        if (firstTask.status === 'pending') {
+          const transition = transitionError(firstTask.status, 'claimed')
+          if (transition !== undefined) throw new Error(transition)
+          firstTask.status = 'claimed'
+          firstTask.updatedAt = Date.now()
+        }
         const member: TeamMember = {
           id: '',
           name: memberName,
@@ -344,6 +400,8 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           member,
           config.stateDir,
           exec.signal,
+          firstTask,
+          brief,
           args.worktree,
         )
         fresh.members.push(member)
@@ -355,6 +413,21 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           ...member.role !== undefined ? { role: member.role } : {},
           ...member.worktree !== undefined ? { worktree: member.worktree } : {},
         })
+        if (createdFirstTask) {
+          appendTeamEvent(ctx, captainSessionOf(ctx, fresh.captainSessionId, captain.session), 'agent-teams/task-created', {
+            teamId: fresh.id,
+            taskId: firstTask.id,
+            subject: firstTask.subject,
+            dependencies: firstTask.dependencies,
+            assignee: member.name,
+          })
+        }
+        appendTeamEvent(ctx, captainSessionOf(ctx, fresh.captainSessionId, captain.session), 'agent-teams/task-updated', {
+          teamId: fresh.id,
+          taskId: firstTask.id,
+          status: firstTask.status,
+          assignee: member.name,
+        })
         return {
           member_name: member.name,
           member_id: member.id,
@@ -363,8 +436,10 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           ...selection.reasoningEffort === undefined
             ? {}
             : { reasoning_effort: selection.reasoningEffort },
-          ...member.worktree !== undefined ? { worktree: member.worktree } : {},
+          ...member.worktree === undefined ? {} : { worktree: member.worktree },
           status: member.status,
+          task_id: firstTask.id,
+          task_status: firstTask.status,
         }
       })
     },

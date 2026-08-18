@@ -21,6 +21,8 @@
   `steer()` or member wakes through a queued followup without interrupt.
 - `agent_teams_delete` must retire members (`cancel` without keepInbox),
   not only interrupt the current turn. claimed → completed is legal.
+- Do not restore a greeting turn. `spawnMember` takes the first claimed
+  task plus captain brief; that is the only initial user message.
 - Panel/status "working" is turn activity, not `listChildren().activity`.
   The store bit is `running` whenever the child session is still live in
   `ctx.sessions`; a stopped conversation stays loaded. `memberActivity`
