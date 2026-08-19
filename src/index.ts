@@ -30,6 +30,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectArchivedTeamsActivity, collectTeamsActivity } from './snapshot.ts'
+import { SNAPSHOT_ROUTE_TIMEOUT_MS, withTimeout } from './timeout.ts'
 
 /**
  * Structural slice of the web server service, compatible with both the
@@ -89,9 +90,9 @@ export const Config: z<Config> = z.object({
 function usageSectionText(toolNames: string): string {
   return `When the user asks to run something with AgentTeams (e.g. "use AgentTeams to do X"), you are the captain of a multi-agent team. Follow this protocol:
 1. Call agent_teams_create with a team name and the goal as description. You become the captain and may lead one team at a time.
-2. Break the goal into tasks with agent_teams_create_task when later work depends on earlier work. Default writers share the captain workspace with exclusive path ownership. Only when two writers must edit the same files in parallel, or the change must stay abortable, create a git worktree first and plan those tasks as per-member lanes — a member's worktree is frozen at spawn.
-3. Call agent_teams_add_member once per role the goal needs, with that member's first task_subject and prompt. The spawn prompt is the first claimed task, not a greeting. Members are durable subagents. By default each member snapshots your current provider, model, and reasoning effort. Never ask the user to choose these per member; only pass provider/model when the user explicitly requests a different route for that role. Pass worktree only for a write-isolated member, and only as the absolute path of a tree you already created; read-only roles refuse worktrees. Merge member trees back in dependency order; you resolve conflicts.
-4. Later turns barge in with agent_teams_send_message naming a task id and instructions. A running recipient is interrupted so the message starts immediately. One task per message keeps turns focused.
+2. Call agent_teams_add_member once per role, with that member's first task_subject and prompt. The spawn prompt is the first claimed task, not a greeting. Do not create_task for a member that does not exist yet. Members are durable subagents. By default each member snapshots your current provider, model, and reasoning effort. Never ask the user to choose these per member; only pass provider/model when the user explicitly requests a different route for that role. Default writers share the captain workspace with exclusive path ownership. Only when two writers must edit the same files in parallel, or the change must stay abortable, create a git worktree first and pass that absolute path as worktree; a member's worktree is frozen at spawn. Read-only roles refuse worktrees. Merge member trees back in dependency order; you resolve conflicts.
+3. After members exist, create later tasks with agent_teams_create_task. Dependencies must already exist. Use only task ids returned by earlier calls (t1, t2, …). Never invent task-1. assignee must name a live member, or omit it. Create in topological order: frontier first, then dependents after those calls return.
+4. Later turns barge in with agent_teams_send_message naming a returned task id and instructions. A running recipient is interrupted so the message starts immediately. One task per message keeps turns focused.
 5. Poll agent_teams_status until members are idle; relay member-to-member messages (agent_teams_send_message with from=<sender>) and collect completed tasks' outputs. If a member reports a blocker, reassign the task or adjust the plan.
 6. Present the team's results to the user, then agent_teams_delete the team unless the user wants to keep working with it.
 
@@ -160,16 +161,29 @@ export function apply(ctx: Context, config: Config): void {
         workspace: workspace.title,
         stateRoot: join(workspace.path, resolved.stateDir),
       }))
-      // ?archived=1 serves teams moved to archive/ (post-delete review).
-      const snapshots = url.searchParams.get('archived') === '1'
-        ? await collectArchivedTeamsActivity(ctx, roots)
-        : await collectTeamsActivity(ctx, roots)
-      const body = JSON.stringify({ teams: snapshots })
-      res.writeHead(200, {
-        'content-type': 'application/json; charset=utf-8',
-        'cache-control': 'no-store',
-      })
-      res.end(body)
+      try {
+        // ?archived=1 serves teams moved to archive/ (post-delete review).
+        const snapshots = await withTimeout(
+          url.searchParams.get('archived') === '1'
+            ? collectArchivedTeamsActivity(ctx, roots)
+            : collectTeamsActivity(ctx, roots),
+          SNAPSHOT_ROUTE_TIMEOUT_MS,
+          `agent-teams snapshot timed out after ${SNAPSHOT_ROUTE_TIMEOUT_MS}ms`,
+        )
+        const body = JSON.stringify({ teams: snapshots })
+        res.writeHead(200, {
+          'content-type': 'application/json; charset=utf-8',
+          'cache-control': 'no-store',
+        })
+        res.end(body)
+      } catch (error: unknown) {
+        ctx.logger.warn(`agent-teams: snapshot route failed: ${String(error)}`)
+        res.writeHead(503, {
+          'content-type': 'application/json; charset=utf-8',
+          'cache-control': 'no-store',
+        })
+        res.end(JSON.stringify({ error: 'snapshot-unavailable' }))
+      }
     },
   }), 'agent-teams: activity route')
 

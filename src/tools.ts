@@ -4,7 +4,7 @@
  * The captain (the agent that created the team) orchestrates: members are
  * continuable subagents it spawns and wakes. Members share the same tools and
  * drive their own task state, mirroring the Claude Code AgentTeams flow:
- * create team → add members → create tasks with dependencies → claim/assign →
+ * create team → add members (first claimed task) → later tasks with returned ids → claim/assign →
  * work → report → status → delete.
  * @module dsh-agent-teams/tools
  */
@@ -210,7 +210,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
 
   ctx.tools.register(defineTool({
     name: 'agent_teams_create',
-    description: 'Create a new AgentTeams team: you (the calling agent) become the captain. A captain leads one team at a time; create tasks and members afterwards with agent_teams_add_member and agent_teams_create_task.',
+    description: 'Create a new AgentTeams team: you (the calling agent) become the captain. A captain leads one team at a time. Spawn each member with agent_teams_add_member (that call creates and claims the member\'s first task). Use agent_teams_create_task only for later tasks, after the assignee already exists, and only with task ids returned by earlier calls (t1, t2, … — never invent task-1).',
     parameters: {
       name: { type: 'string', required: true, description: 'Name for the new team (used as its stable id).' },
       description: { type: 'string', description: 'Team purpose / the goal the team will work on.' },
@@ -222,6 +222,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
         properties: {
           team_id: { type: 'string', required: true },
           team_name: { type: 'string', required: true },
+          captain_session_id: { type: 'string', required: true },
           state_dir: { type: 'string', required: true },
         },
       },
@@ -229,6 +230,15 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
         type: 'text',
         text: `Team "${value.team_name}" created (id ${value.team_id}) under ${value.state_dir}. You are the captain.`,
       }],
+      presentationMeta(_args, value): JsonValue {
+        return {
+          kind: 'create',
+          teamId: value.team_id,
+          teamName: value.team_name,
+          captainSessionId: String(value.captain_session_id),
+          members: [],
+        }
+      },
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
@@ -265,7 +275,12 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
             name: state.name,
             ...state.description !== undefined ? { description: state.description } : {},
           })
-          return { team_id: state.id, team_name: state.name, state_dir: join(stateRoot, state.id) }
+          return {
+            team_id: state.id,
+            team_name: state.name,
+            captain_session_id: captain.id,
+            state_dir: join(stateRoot, state.id),
+          }
         })
       })
     },
@@ -273,7 +288,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
 
   ctx.tools.register(defineTool({
     name: 'agent_teams_add_member',
-    description: 'Add a durable continuable member and start its first claimed task in the same call. The spawn prompt is that first task, not a greeting. By default it snapshots the captain\'s current LLM provider, model, and reasoning effort. Supply provider/model only for an explicitly requested role-specific route.',
+    description: 'Add a durable continuable member and start its first claimed task in the same call. Spawn members before creating later tasks for them. The spawn prompt is that first task, not a greeting — prompt is required. By default it snapshots the captain\'s current LLM provider, model, and reasoning effort. Supply provider/model only for an explicitly requested role-specific route.',
     parameters: {
       name: { type: 'string', required: true, description: 'Unique member name inside the team.' },
       role: { type: 'string', description: 'Role of the member (e.g. researcher, engineer, reviewer).' },
@@ -295,8 +310,10 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
         type: 'object',
         additionalProperties: false,
         properties: {
+          team_id: { type: 'string', required: true },
           member_name: { type: 'string', required: true },
           member_id: { type: 'string', required: true },
+          role: { type: 'string' },
           provider: { type: 'string', required: true },
           model: { type: 'string', required: true },
           reasoning_effort: { type: 'string' },
@@ -310,6 +327,17 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
         type: 'text',
         text: `Member "${value.member_name}" added (subagent id ${value.member_id}, ${value.provider}/${value.model}${value.reasoning_effort === undefined ? '' : `, reasoning ${value.reasoning_effort}`}${value.worktree === undefined ? '' : `, worktree ${value.worktree}`}, status ${value.status}). First task ${value.task_id} is ${value.task_status}.`,
       }],
+      presentationMeta(_args, value): JsonValue {
+        return {
+          kind: 'add-member',
+          teamId: String(value.team_id),
+          member: {
+            id: String(value.member_id),
+            name: String(value.member_name),
+            role: typeof value.role === 'string' ? value.role : '',
+          },
+        }
+      },
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
@@ -429,8 +457,10 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           assignee: member.name,
         })
         return {
+          team_id: fresh.id,
           member_name: member.name,
           member_id: member.id,
+          ...member.role === undefined ? {} : { role: member.role },
           provider: selection.provider,
           model: selection.model,
           ...selection.reasoningEffort === undefined
@@ -456,6 +486,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
         type: 'object',
         additionalProperties: false,
         properties: {
+          team_id: { type: 'string', required: true },
           member_name: { type: 'string', required: true },
           status: { type: 'string', required: true },
         },
@@ -464,6 +495,13 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
         type: 'text',
         text: `Member "${value.member_name}" removed (status ${value.status}).`,
       }],
+      presentationMeta(_args, value): JsonValue {
+        return {
+          kind: 'remove-member',
+          teamId: String(value.team_id),
+          name: String(value.member_name),
+        }
+      },
     },
     async execute(args, exec) {
       const captain = requireCaptain(exec)
@@ -480,23 +518,23 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           teamId: fresh.id,
           memberId: member.id,
         })
-        return { member_name: member.name, status: member.status }
+        return { team_id: fresh.id, member_name: member.name, status: member.status }
       })
     },
   }))
 
   ctx.tools.register(defineTool({
     name: 'agent_teams_create_task',
-    description: 'Create a task in your team\'s task list. Tasks can depend on other tasks (dependencies): a task is only claimable once every dependency is completed. Optionally assign it to a member, who still claims it before working.',
+    description: 'Create a later task after its assignee already exists. Do not use this to start a new member — agent_teams_add_member creates that first claimed task. assignee must name a live member (or omit it). dependencies must be ids returned by earlier calls (t1, t2, …). Never invent task-1. A task is only claimable once every dependency is completed.',
     parameters: {
       subject: { type: 'string', required: true, description: 'Brief title for the task.' },
       description: { type: 'string', description: 'What needs to be done, in detail.' },
       dependencies: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Task ids this task depends on (must be completed before this task can be claimed).',
+        description: 'Task ids returned by earlier calls (t1, t2, …). Those tasks must already exist. Do not invent task-1.',
       },
-      assignee: { type: 'string', description: 'Optional member name this task is intended for.' },
+      assignee: { type: 'string', description: 'Optional live member name. The member must already exist; spawn them with agent_teams_add_member first.' },
     },
     output: {
       schema: {
@@ -527,7 +565,15 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
             throw new Error(`dependency "${dependency}" does not exist in team "${fresh.name}"`)
           }
         }
-        if (args.assignee !== undefined) requireMember(fresh, args.assignee)
+        if (args.assignee !== undefined) {
+          try {
+            requireMember(fresh, args.assignee)
+          } catch {
+            throw new Error(
+              `no active member named "${args.assignee}" in team "${fresh.name}" — spawn them with agent_teams_add_member first`,
+            )
+          }
+        }
         const task: TeamTask = {
           id: `t${fresh.taskSeq + 1}`,
           subject: args.subject,

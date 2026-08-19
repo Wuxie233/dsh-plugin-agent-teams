@@ -29,6 +29,30 @@ export function activityPanelExpandedForSession(
   return open && owner !== undefined && owner === current
 }
 
+/** Bound for one browser snapshot fetch. */
+export const STATE_FETCH_TIMEOUT_MS = 2500
+
+/**
+ * Fetch JSON with an abort timeout. A hung host must not freeze the card
+ * on its empty fold.
+ * @param url - snapshot URL.
+ * @param timeoutMs - abort after this many milliseconds.
+ */
+export async function fetchJsonWithTimeout(
+  url: string,
+  timeoutMs: number = STATE_FETCH_TIMEOUT_MS,
+): Promise<{ ok: boolean; json: unknown }> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => { controller.abort() }, timeoutMs)
+  try {
+    const response = await fetch(url, { cache: 'no-store', signal: controller.signal })
+    if (!response.ok) return { ok: false, json: undefined }
+    return { ok: true, json: await response.json() }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** Group tasks by their precomputed dependency depth. */
 export function taskStages<T extends RelationshipTask>(tasks: readonly T[]): readonly RelationshipStage<T>[] {
   const byDepth = new Map<number, T[]>()

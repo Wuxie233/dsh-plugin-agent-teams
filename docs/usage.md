@@ -47,7 +47,7 @@
 | `agent_teams_create` | 创建团队，调用者成为队长（一个队长同时只带一个团队） |
 | `agent_teams_add_member` | 拉成员入队并立刻派发第一份任务（出生 prompt 就是这份任务，不是欢迎轮） |
 | `agent_teams_remove_member` | 移除成员（尽力打断其当前轮次） |
-| `agent_teams_create_task` | 创建任务，支持 `dependencies` 依赖声明与 `assignee` 指派 |
+| `agent_teams_create_task` | 给**已存在**的成员创建后续任务；`assignee` 必须是在册成员；`dependencies` 只能用先前返回的 `t1`/`t2`/… |
 | `agent_teams_claim_task` | 领取任务（校验依赖；队长可代领，成员只能领自己的/未指派的） |
 | `agent_teams_update_task` | 推进任务状态并写入 `output` 结果 |
 | `agent_teams_send_message` | 任意成员→任意成员/队长：消息直达对方邮箱并插嘴投递（打断当前轮次后立刻开始；无队长转发；拒绝冒名 `from`） |
@@ -77,7 +77,7 @@
 
 ## 使用协议
 
-插件提示段会指导模型按协议执行：建团队 → 需要时先拆后续任务 → 按角色拉成员并带上第一份任务 brief（出生即开工）→ 后续轮次用 `agent_teams_send_message` 插嘴投递 → 轮询 `agent_teams_status` 收集产出 → 汇报后 `agent_teams_delete`。成员之间可以直接互发消息，无需队长中转。
+插件提示段会指导模型按协议执行：建团队 → 按角色拉成员并带上第一份任务 brief（出生即开工）→ 成员存在后再用返回的 `t1`/`t2`/… 拆后续任务 → 后续轮次用 `agent_teams_send_message` 插嘴投递 → 轮询 `agent_teams_status` 收集产出 → 汇报后 `agent_teams_delete`。成员之间可以直接互发消息，无需队长中转。不要先给还不存在的人 `create_task`，也不要发明 `task-1`。
 
 ## 已知限制
 
@@ -86,7 +86,7 @@
 - 成员 persona 替换部署默认 persona。写者默认拥有完整工具集；只读角色在 spawn 时被拒绝 `write` / `edit` / `bash`。
 - 可选成员 worktree 依赖本机打过 cwd 缝的 runtime；缝没打上时 spawn 会 fail loud 并打断该成员，不会静默写回队长树。deployment 的 `pnpm install` 会冲掉这份缝。
 - 团队状态为文件级持久化，多进程同时操作同一团队不保证一致（同一 dsh 进程内已用锁串行化）。
-- 活动面板读磁盘真相（1s 轮询），与会话日志事件流相互独立。成员「工作中」只看 live Agent 是否正在跑一轮；会话还在内存、对话已停止时显示空闲，不沿用 `listChildren().activity`。
+- 对话流卡片从 create / add_member / remove_member 的 `tool/result.meta` 折叠花名册；活动面板仍读磁盘真相（1s 轮询，快照路由有超时）。成员「工作中」只看 live Agent 是否正在跑一轮；会话还在内存、对话已停止时显示空闲，不沿用 `listChildren().activity`。快照失败时卡片保留折叠花名册，不把它显示成 0 人。
 - 右上角浮层通过 body portal 挂载；宽屏展开时主对话列平滑向左礼让空间，窄屏退回 overlay 模式，左侧导航保持不动。
 - 成员（模型）不总是严格走工具"仪式"（如完成时不调 `agent_teams_update_task`）——面板如实反映磁盘真相，队长以 `agent_teams_status`/文件为准汇总。
 

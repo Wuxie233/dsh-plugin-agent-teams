@@ -12,7 +12,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { memberActivity } from './members.ts'
+import { turnActivityOf } from './members.ts'
 import {
   CAPTAIN_KEY, listArchivedTeamIds, readArchivedTeam, readMailbox, readTeam,
   taskDepthsById, taskVisualState,
@@ -89,11 +89,9 @@ export async function assembleTeamSnapshot(
 ): Promise<TeamActivitySnapshot> {
   const tasks = state.tasks
   const depths = taskDepthsById(tasks)
-  let activity = new Map<string, 'running' | 'inactive'>()
-  try {
-    activity = await memberActivity(ctx, state.captainSessionId)
-  } catch (error: unknown) {
-    ctx.logger.warn(`agent-teams: activity listing failed for ${state.name}: ${String(error)}`)
+  const activity = new Map<string, 'running' | 'inactive'>()
+  for (const member of state.members) {
+    if (member.id !== '') activity.set(member.id, turnActivityOf(ctx, member.id))
   }
   const unreadByMember = new Map<string, number>()
   for (const member of state.members.filter((candidate) => candidate.status !== 'removed')) {

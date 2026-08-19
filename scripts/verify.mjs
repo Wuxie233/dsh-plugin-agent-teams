@@ -29,7 +29,12 @@ import {
   withTeamLock,
 } from '../lib/state.js'
 import { activityPanelExpandedForSession, relatedTaskIds, taskStages } from '../lib/client/activity-model.js'
-import { parseAgentTeamsCreateArgs } from '../lib/client/agent-teams-card-definition.js'
+import {
+  agentTeamsCardDefinition,
+  parseAgentTeamsCreateArgs,
+} from '../lib/client/agent-teams-card-definition.js'
+import { parseAgentTeamsToolMeta } from '../lib/card-meta.js'
+import { ACTIVITY_LIST_TIMEOUT_MS, withTimeout } from '../lib/timeout.js'
 import { bargeCaptainReport } from '../lib/tools.js'
 import {
   deliverToMember,
@@ -350,6 +355,18 @@ try {
       && mixedLive.get('sess-cold') === 'inactive',
     `got backend=${mixedLive.get('sess-backend')} frontend=${mixedLive.get('sess-frontend')} cold=${mixedLive.get('sess-cold')}`,
   )
+
+  const missingAgentCtx = {
+    agents: { get: () => undefined },
+    logger: { warn: () => {} },
+  }
+  const missingSnapshot = await assembleTeamSnapshot(missingAgentCtx, activityRoot, 'workspace', activityTeam)
+  check(
+    'snapshot roster comes from disk even when no live agent is loaded',
+    missingSnapshot.members.length === 3
+      && missingSnapshot.members.every((member) => member.activity !== 'working'),
+    JSON.stringify(missingSnapshot.members.map((member) => `${member.name}:${member.activity}`)),
+  )
 } finally {
   await rm(activityRoot, { recursive: true, force: true })
 }
@@ -388,6 +405,100 @@ check(
     === JSON.stringify({ teamId: 'repo-review-2w', name: 'Repo Review 2W!' }),
 )
 check('malformed create tool arguments do not create a card', parseAgentTeamsCreateArgs('{bad') === undefined)
+check(
+  'create meta round-trips for the card fold',
+  parseAgentTeamsToolMeta({
+    kind: 'create',
+    teamId: 'session-rehome',
+    teamName: 'session-rehome',
+    captainSessionId: 'sess-captain',
+    members: [],
+  })?.kind === 'create',
+)
+
+{
+  const callId = 'call-create'
+  const startEvent = {
+    type: 'tool/call',
+    seq: 1,
+    data: { callId, name: 'agent_teams_create', arguments: '{"name":"session-rehome"}' },
+  }
+  const createResult = {
+    type: 'tool/result',
+    seq: 2,
+    data: {
+      meta: {
+        kind: 'create',
+        teamId: 'session-rehome',
+        teamName: 'session-rehome',
+        captainSessionId: 'sess-captain',
+        members: [],
+      },
+      message: {
+        source: { kind: 'tool', callId },
+        content: [{ type: 'text', text: 'Team "session-rehome" created (id session-rehome) under /tmp. You are the captain.' }],
+      },
+    },
+  }
+  const addResult = {
+    type: 'tool/result',
+    seq: 3,
+    data: {
+      meta: {
+        kind: 'add-member',
+        teamId: 'session-rehome',
+        member: { id: 'sess-core', name: 'core-engineer', role: 'engineer' },
+      },
+      message: { source: { kind: 'tool', callId: 'call-add' }, content: [{ type: 'text', text: 'added' }] },
+    },
+  }
+  const startMatch = agentTeamsCardDefinition.match(startEvent)
+  const addMatch = agentTeamsCardDefinition.match(addResult)
+  check('card start id is the team id, not the create call id', startMatch?.id === 'session-rehome' && startMatch.role === 'start')
+  check('add_member result joins the same team context', addMatch?.id === 'session-rehome' && addMatch.role === 'update')
+  let state = agentTeamsCardDefinition.start({}, { event: startEvent })
+  state = agentTeamsCardDefinition.update({ state }, { event: createResult })
+  state = agentTeamsCardDefinition.update({ state }, { event: addResult })
+  const node = agentTeamsCardDefinition.buildViewNode({
+    start: { event: startEvent, location: { kind: 'session' } },
+    state,
+    key: 'k',
+    id: 'session-rehome',
+  })
+  check(
+    'folded card shows the added member without a state-route poll',
+    node?.data?.members?.length === 1
+      && node.data.members[0]?.name === 'core-engineer'
+      && node.data.captainSessionId === 'sess-captain',
+    JSON.stringify(node?.data),
+  )
+  const historicCreate = {
+    type: 'tool/result',
+    seq: 2,
+    data: {
+      message: {
+        source: { kind: 'tool', callId },
+        content: [{ type: 'text', text: 'Team "session-rehome" created (id session-rehome) under /tmp. You are the captain.' }],
+      },
+    },
+  }
+  check(
+    'historic create results still pair by rendered team id',
+    agentTeamsCardDefinition.match(historicCreate)?.id === 'session-rehome',
+  )
+}
+
+{
+  const started = Date.now()
+  let timedOut = false
+  try {
+    await withTimeout(new Promise(() => {}), 20, 'timed out')
+  } catch (error) {
+    timedOut = error instanceof Error && error.message === 'timed out'
+  }
+  check('withTimeout rejects a hung wait', timedOut && Date.now() - started < 500)
+  check('activity listing timeout is bounded', ACTIVITY_LIST_TIMEOUT_MS === 1500)
+}
 
 const captainDeliveries = []
 const captainCancels = []

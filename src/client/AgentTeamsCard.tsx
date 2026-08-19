@@ -15,6 +15,7 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ActivityTeam } from './ActivityPanel.tsx'
 import type { AgentTeamsCardData } from './agent-teams-card-definition.ts'
+import { fetchJsonWithTimeout } from './activity-model.ts'
 import { LEAD_ART, memberArtUrl } from './artwork.ts'
 import css from './AgentTeamsCard.module.css'
 
@@ -57,18 +58,18 @@ export function AgentTeamsCard({ node, openSession, currentSessionId }: AgentTea
     const tick = async (): Promise<void> => {
       for (const url of ['/plugins/dsh-agent-teams/state', '/plugins/dsh-agent-teams/state?archived=1']) {
         try {
-          const response = await fetch(url, { cache: 'no-store' })
-          if (!response.ok) continue
-          const body = (await response.json()) as { teams?: readonly ActivityTeam[] }
-          const found = Array.isArray(body.teams)
-            ? body.teams.find((team) => team.teamId === data.teamId && (owner === '' || team.captainSessionId === owner))
+          const { ok, json } = await fetchJsonWithTimeout(url)
+          if (!ok || typeof json !== 'object' || json === null || !('teams' in json)) continue
+          const teams = json.teams
+          const found = Array.isArray(teams)
+            ? (teams as readonly ActivityTeam[]).find((team) => team.teamId === data.teamId && (owner === '' || team.captainSessionId === owner))
             : undefined
           if (found !== undefined) {
             if (!cancelled) setSnapshot(found)
             return
           }
         } catch {
-          // Host restarting; retry on the next poll.
+          // Host restarting or timed out; keep the folded roster.
         }
       }
     }

@@ -15,8 +15,16 @@
   Don't make it required.
 - Deploy by copy (`install.sh`), never symlink (Node ESM resolution).
 - Host-half changes need a dsh web restart; client-half only a page refresh.
+- The conversation card folds create/add_member/remove_member
+  `tool/result.meta` onto one team id. Do not hardcode `members: []`.
+  Snapshot polls may enrich live activity; a failed poll must keep the
+  folded roster.
 - The activity panel stays collapsed until the user opens it (corner
   badge or conversation card). Do not reintroduce auto-expand.
+- Captain protocol: add_member first (required prompt, first claimed
+  task). create_task is for later work after the assignee exists, using
+  returned `t1`/`t2` ids only. Keep the skill, usage prompt, and tool
+  descriptions on that order.
 - Live team messages barge in. Do not route captain reports through
   `steer()` or member wakes through a queued followup without interrupt.
 - `agent_teams_delete` must retire members (`cancel` without keepInbox),

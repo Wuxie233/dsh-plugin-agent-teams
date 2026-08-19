@@ -505,13 +505,15 @@ export function turnActivityOf(ctx: Context, childId: string): 'running' | 'inac
  * `inactive`.
  * @param ctx - the plugin context (injects `subagents` and `agents`).
  * @param captainSessionId - the captain's session id.
+ * @param signal - optional abort forwarded to `listChildren`.
  * @returns child id → activity, missing entries are unknown children.
  */
 export async function memberActivity(
   ctx: Context,
   captainSessionId: string,
+  signal?: AbortSignal,
 ): Promise<Map<string, 'running' | 'inactive'>> {
-  const entries = await ctx.subagents.listChildren(brandedSessionId(captainSessionId))
+  const entries = await ctx.subagents.listChildren(brandedSessionId(captainSessionId), signal)
   const activity = new Map<string, 'running' | 'inactive'>()
   for (const entry of entries) {
     if (entry.kind === 'child') activity.set(entry.id, turnActivityOf(ctx, entry.id))
