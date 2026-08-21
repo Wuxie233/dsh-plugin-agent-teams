@@ -25,17 +25,16 @@
   task). create_task is for later work after the assignee exists, using
   returned `t1`/`t2` ids only. Keep the skill, usage prompt, and tool
   descriptions on that order.
-- Live team messages queue by default (`followup` only). Pass `mode=barge`
-  to interrupt. Do not restore barge as the default, and do not route
-  reports through `steer()`.
+- Live team messages barge in by default. Pass `mode=queue` only when
+  the current turn must finish. Do not route reports through `steer()`.
+  Captains do not send blank continue reminders; they wait for a member
+  report or a stall notice, then barge a new instruction.
 - Optional `cwd` on add_member pins the child workspace. A cwd that is
   not the captain workspace writes `captain-pointer.json`. When both
   `cwd` and `worktree` are set they must be the same path.
 - An interrupted member that goes idle with open claimed/in_progress
   tasks and an empty inbox queues a captain stall notice. Do not fail or
-  unclaim the task.
-- Captain session resume (`agent/session-start` source=resume) queues a
-  continue wake to members that still own claimed or in_progress work.
+  unclaim the task. Do not auto-wake members on captain session resume.
 - `agent_teams_delete` must retire members (`cancel` without keepInbox),
   not only interrupt the current turn. claimed → completed is legal.
 - Do not restore a greeting turn. `spawnMember` takes the first claimed

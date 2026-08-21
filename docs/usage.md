@@ -10,7 +10,7 @@
 |---|---|
 | `ctx.tools` 注册表 | 注册 10 个 `agent_teams_*` 工具（与 `tool-workflow` 同一注册路径） |
 | `ctx.subagents.startContinuable()` | 创建成员：durable 可续聊子代理，带成员 persona |
-| `ctx.subagents.followup()`；可选 `interrupt()` / `Agent.cancel()` | 默认排队到下一轮；`mode=barge` 才打断当前轮次再立刻投递 |
+| `ctx.subagents.interrupt()` + `followup()` / `Agent.cancel()` + `followup()` | 默认插话：先打断收件人当前轮次再立刻投递；`mode=queue` 才排到下一轮 |
 | `ctx.subagents.listChildren()` + `ctx.agents.get().status` | 查询成员是否正在跑一轮（store 里的 `running` 只表示会话还在内存，停掉的对话仍可能是 `running`） |
 | `ctx.systemPrompt.section()` | 注册"AgentTeams 使用策略"提示段 |
 | Web server 路由注册 | 活动面板数据路由 `/plugins/dsh-agent-teams/state` + 鲸鱼图片静态服务（`webServer`/`httpServer` 双键兼容，见下） |
@@ -50,7 +50,7 @@
 | `agent_teams_create_task` | 给**已存在**的成员创建后续任务；`assignee` 必须是在册成员；`dependencies` 只能用先前返回的 `t1`/`t2`/… |
 | `agent_teams_claim_task` | 领取任务（校验依赖；队长可代领，成员只能领自己的/未指派的） |
 | `agent_teams_update_task` | 推进任务状态并写入 `output` 结果 |
-| `agent_teams_send_message` | 任意成员→任意成员/队长：消息直达对方邮箱；默认排队到收件人下一轮，`mode=barge` 才打断当前轮次；无队长转发；拒绝冒名 `from` |
+| `agent_teams_send_message` | 任意成员→任意成员/队长：消息直达对方邮箱；默认插话打断当前轮次，`mode=queue` 才排到下一轮；禁止空的「请继续」催办；无队长转发；拒绝冒名 `from` |
 | `agent_teams_status` | 团队全景：成员活动、任务清单、队长邮箱、各成员待读消息 |
 | `agent_teams_delete` | 结束团队：打断成员并清空其排队消息，团队目录**归档保留**（任务与依赖图、邮箱完整留存） |
 | `agent_teams_report_issue` | 队长或未建队会话把插件缺陷报到 `Wuxie233/dsh-plugin-agent-teams`；成员不可见也不可用 |
@@ -77,11 +77,11 @@
 
 ## 使用协议
 
-插件提示段会指导模型按协议执行：建团队 → 按角色拉成员并带上第一份任务 brief（出生即开工）→ 成员存在后再用返回的 `t1`/`t2`/… 拆后续任务 → 后续轮次用 `agent_teams_send_message` 排队投递（默认不打断；催办才 `mode=barge`）→ 成员报告和 stall 通知叫醒队长 → 汇报后 `agent_teams_delete`。成员之间可以直接互发消息，无需队长中转。不要先给还不存在的人 `create_task`，也不要发明 `task-1`。
+插件提示段会指导模型按协议执行：建团队 → 按角色拉成员并带上第一份任务 brief（出生即开工）→ 成员存在后再用返回的 `t1`/`t2`/… 拆后续任务 → 派完就等成员报告或 stall 通知，不要空催 → 有新指令或改方案时用 `agent_teams_send_message` 插话投递 → 汇报后 `agent_teams_delete`。成员之间可以直接互发消息，无需队长中转。不要先给还不存在的人 `create_task`，也不要发明 `task-1`。
 
 ## 已知限制
 
-- 成员在收到消息后才行动，没有常驻轮询。在线投递默认排队到收件人下一轮；`mode=barge` 才打断当前轮次。被 interrupt 后若仍占着 claimed/in_progress 任务且 inbox 为空，会给队长发一条 stall 通知，任务不会被自动失败或取消认领。队长会话 resume 时会给这些停住的成员排队一条继续干活的消息。队长离线时消息留在邮箱、待下次在线时投递。
+- 成员在收到消息后才行动，没有常驻轮询。队长派完第一份 brief 后等待成员报告或 stall 通知，不因工作区还没文件就催「请继续」。在线投递默认插话打断当前轮次；`mode=queue` 才排到下一轮。被 interrupt 后若仍占着 claimed/in_progress 任务且 inbox 为空，会给队长发一条 stall 通知（插件观测，不是成员回报），任务不会被自动失败或取消认领。队长会话 resume 不会自动喊成员继续。队长离线时消息留在邮箱、待下次在线时投递。
 - 一个队长同时只能带一个团队（与 Claude Code AgentTeams 一致）。
 - 成员 persona 替换部署默认 persona。写者默认拥有完整工具集；只读角色在 spawn 时被拒绝 `write` / `edit` / `bash`。
 - 可选成员 worktree 依赖本机打过 cwd 缝的 runtime；缝没打上时 spawn 会 fail loud 并打断该成员，不会静默写回队长树。deployment 的 `pnpm install` 会冲掉这份缝。

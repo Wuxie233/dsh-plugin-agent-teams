@@ -35,9 +35,10 @@ README/README_ZH/docs still apply unless overridden here.
 - **Activity panel stays collapsed**: no auto-expand after settle or new
   activity. The corner badge and conversation card remain the only open
   paths.
-- **Queued delivery by default**: `agent_teams_send_message` becomes the
-  next FIFO turn. Pass `mode=barge` to interrupt (`cancel`/`interrupt`
-  then `followup`). Steering is still unused.
+- **Barge-in delivery by default**: `agent_teams_send_message` interrupts
+  a running recipient, then delivers immediately. Pass `mode=queue` when
+  the current turn must finish. Captains do not send blank continue
+  reminders. Steering is still unused.
 - **Spawn brief fallbacks**: `prompt` is documented; `brief` /
   `instructions` / `task_description` / `task_subject` are accepted so a
   dropped XML `prompt` field does not fail the call.
@@ -45,10 +46,9 @@ README/README_ZH/docs still apply unless overridden here.
   sits on an umbrella workspace. Differs from `worktree` (no `.git`
   requirement). A cwd that is not the captain workspace writes a
   captain-pointer.
-- **Stall wake**: an interrupted member that goes idle with open
+- **Stall notice**: an interrupted member that goes idle with open
   claimed/in_progress tasks and an empty inbox queues a captain notice.
-  Tasks stay claimed. Captain session resume queues a continue wake to
-  those parked members.
+  Tasks stay claimed. Captain session resume does not auto-wake members.
 - **Teardown drops queued member work**: `agent_teams_delete` calls
   `retireMember` (`cancel` without `keepInbox`) so stale follow-ups
   cannot keep waking the captain after the team is archived.

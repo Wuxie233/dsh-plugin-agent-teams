@@ -485,9 +485,9 @@ export async function spawnMember(
 export type TeamDeliveryMode = 'queue' | 'barge'
 
 /**
- * Deliver one message to a member. Queue (default) becomes the next FIFO
- * turn and does not abort in-flight tools. Barge interrupts the current
- * turn first so the new message starts immediately.
+ * Deliver one message to a member. Barge (default) interrupts the current
+ * turn so a new instruction starts immediately. Queue becomes the next FIFO
+ * turn and does not abort in-flight tools.
  *
  * Best effort: a failure (member gone or not continuable) is logged and
  * reported as `false` so the caller can decide (mailbox delivery still
@@ -511,7 +511,7 @@ export async function deliverToMember(
   childId: string,
   text: string,
   signal: AbortSignal,
-  mode: TeamDeliveryMode = 'queue',
+  mode: TeamDeliveryMode = 'barge',
 ): Promise<boolean> {
   if (mode === 'barge') interruptMember(ctx, captain, childId)
   try {

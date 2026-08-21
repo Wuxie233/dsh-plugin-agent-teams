@@ -16,8 +16,8 @@ a stalled member without polling.
 
 ## In scope
 
-- `agent_teams_send_message` defaults to queue (next FIFO turn). `mode=barge`
-  is the explicit interrupt path.
+- `agent_teams_send_message` defaults to barge. `mode=queue` waits out the
+  current turn. Captains do not send blank continue reminders.
 - An interrupted member that goes idle with open claimed/in_progress tasks and
   no pending inbox wakes the captain through the durable mailbox.
 - `agent_teams_add_member` accepts a spawn brief from `prompt`, `brief`,
@@ -30,8 +30,8 @@ a stalled member without polling.
   in_progress tasks. Status for a member viewer leads with those tasks.
   `claimed` counts as current work in the activity snapshot.
 - The first spawned task is marked `in_progress` once the child exists.
-- Captain `agent/session-start` with `source=resume` queues a continue wake
-  to every member that still owns claimed or in_progress work.
+- Captain session resume does not auto-wake members. Stall notices tell the
+  captain who is parked; the captain barges a new instruction after that.
 
 ## Non-goals
 
@@ -54,8 +54,8 @@ a stalled member without polling.
 
 Offline `node scripts/verify.mjs` after `pnpm build` proves:
 
-1. Queue delivery follows up without `interrupt`; barge still interrupts.
-2. Captain queue delivery followups without `cancel`; barge still cancels.
+1. Default delivery interrupts; explicit `mode=queue` follows up without interrupt.
+2. Default captain delivery cancels the current turn; explicit queue does not.
 3. Spawn brief falls back when `prompt` is absent.
 4. Non-worktree `cwd` is passed through, writes a captain pointer when it
    differs from the captain workspace, and rejects a relative path.
@@ -64,16 +64,16 @@ Offline `node scripts/verify.mjs` after `pnpm build` proves:
    does not.
 6. Spawn prompt / assigned-work helper lists claimed tasks; snapshot
    `currentTask` uses claimed when nothing is `in_progress`.
-7. Captain resume selects claimed idle members and skips empty or removed
-   boards.
+7. Captain resume does not select members to auto-wake.
 
 GitHub issues #14, #13, #12, #11, #7, #6, and #5 are closed with the
 implementing commit.
 
 ## Resolved decisions
 
-- Queue is the default because DSH `send_message` already queues, and barge
-  aborted in-flight exclusive-file work (#13). Barge remains an explicit mode.
+- Barge is the default because a captain message is new information or a
+  plan change. Blank continue reminders are forbidden; that is what made
+  barge unsafe in #13.
 - Stall handling notifies; it does not fail or unclaim the task, so the same
   task can be resumed.
 - `prompt` stays the documented spawn-brief name. It is no longer schema-

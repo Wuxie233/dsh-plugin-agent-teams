@@ -49,7 +49,7 @@ import {
   retireMember,
   spawnMember,
 } from '../lib/members.js'
-import { captainResumeWakeText, lastMatchingStallNotice, lastTurnEndKind, membersToWakeOnCaptainResume, shouldNotifyMemberStall, stallCaptainMessage } from '../lib/stall.js'
+import { lastMatchingStallNotice, lastTurnEndKind, shouldNotifyMemberStall, stallCaptainMessage } from '../lib/stall.js'
 import { assembleTeamSnapshot } from '../lib/snapshot.js'
 import {
   FEEDBACK_LABEL,
@@ -546,9 +546,24 @@ const captainQueued = deliverCaptainReport(
   },
   'alice',
   'finished t1',
+  'queue',
+)
+const defaultCaptainCancels = []
+const defaultCaptainDeliveries = []
+const captainDefault = deliverCaptainReport(
+  {
+    cancel: (cause, options) => defaultCaptainCancels.push({ cause, options }),
+    followup: message => defaultCaptainDeliveries.push(message),
+  },
+  'alice',
+  'finished t1',
 )
 check(
-  'default captain delivery queues without cancelling the current turn',
+  'default captain delivery barges into the live captain',
+  captainDefault && defaultCaptainCancels.length === 1 && defaultCaptainDeliveries.length === 1,
+)
+check(
+  'explicit queue captain delivery does not cancel the current turn',
   captainQueued && queuedCaptainCancels.length === 0 && queuedCaptainDeliveries.length === 1,
 )
 check(
@@ -558,8 +573,8 @@ check(
     followup: () => { throw new Error('offline') },
   }, 'alice', 'finished t1') === false,
 )
-check('parseDeliveryMode defaults to queue', parseDeliveryMode(undefined) === 'queue' && parseDeliveryMode('queue') === 'queue')
-check('parseDeliveryMode accepts barge', parseDeliveryMode('barge') === 'barge')
+check('parseDeliveryMode defaults to barge', parseDeliveryMode(undefined) === 'barge' && parseDeliveryMode('barge') === 'barge')
+check('parseDeliveryMode accepts queue', parseDeliveryMode('queue') === 'queue')
 let badMode = false
 try { parseDeliveryMode('steer') } catch (error) { badMode = String(error).includes('queue') }
 check('parseDeliveryMode rejects unknown modes', badMode)
@@ -583,11 +598,38 @@ const memberAccepted = await deliverToMember(
   new AbortController().signal,
 )
 check(
-  'default member delivery queues without interrupt',
+  'default member delivery interrupts the current turn before followup',
   memberAccepted
-    && memberInterrupts.length === 0
+    && memberInterrupts.length === 1
+    && memberInterrupts[0]?.id === 'sess-backend'
     && memberFollowups.length === 1
     && memberFollowups[0]?.id === 'sess-backend',
+)
+const queuedFollowups = []
+const queuedInterrupts = []
+const queuedAccepted = await deliverToMember(
+  {
+    subagents: {
+      interrupt: (id, authority) => queuedInterrupts.push({ id, authority }),
+      followup: async (_captain, id, content) => {
+        queuedFollowups.push({ id, content })
+        return 'msg-q'
+      },
+    },
+    logger: { warn: () => {} },
+  },
+  { id: 'captain' },
+  'sess-backend',
+  'continue t2 later',
+  new AbortController().signal,
+  'queue',
+)
+check(
+  'explicit queue member delivery does not interrupt',
+  queuedAccepted
+    && queuedInterrupts.length === 0
+    && queuedFollowups.length === 1
+    && queuedFollowups[0]?.id === 'sess-backend',
 )
 const bargedFollowups = []
 const bargedInterrupts = []
@@ -697,7 +739,8 @@ check(
     openTaskIds: ['t1'],
     pendingInbox: false,
   }).notify === true
-    && stallCaptainMessage('backend', ['t1']).includes('still owning t1'),
+    && stallCaptainMessage('backend', ['t1']).includes('Plugin stall notice')
+    && stallCaptainMessage('backend', ['t1']).includes('still owns t1'),
 )
 check(
   'pending inbox or completed turn does not notify',
@@ -717,17 +760,6 @@ check(
     }).notify === false,
 )
 const stallText = stallCaptainMessage('backend', ['t1'])
-check(
-  'captain resume wakes claimed idle members and skips empty boards',
-  membersToWakeOnCaptainResume([
-    { name: 'git-chip', id: 'sess-a', status: 'idle', activity: 'inactive', openTaskIds: ['t1'] },
-    { name: 'busy', id: 'sess-busy', status: 'idle', activity: 'running', openTaskIds: ['t4'] },
-    { name: 'done', id: 'sess-b', status: 'idle', activity: 'inactive', openTaskIds: [] },
-    { name: 'removed', id: 'sess-c', status: 'removed', activity: 'inactive', openTaskIds: ['t9'] },
-    { name: 'unspawned', id: '', status: 'idle', activity: 'inactive', openTaskIds: ['t2'] },
-  ]).join(',') === 'git-chip'
-    && captainResumeWakeText(['t1']).includes('Continue your assigned work now (t1)'),
-)
 check(
   'duplicate stall for the same open tasks is suppressed',
   shouldNotifyMemberStall({

@@ -44,7 +44,6 @@ import {
   resolveMemberLlmSelection,
   retireMember,
   spawnMember,
-  turnActivityOf,
   type MemberRuntimeConfig,
   type TeamDeliveryMode,
 } from './members.ts'
@@ -55,10 +54,8 @@ import {
   type IssueSeverity,
 } from './report-issue.ts'
 import {
-  captainResumeWakeText,
   lastMatchingStallNotice,
   lastTurnEndKind,
-  membersToWakeOnCaptainResume,
   shouldNotifyMemberStall,
   stallCaptainMessage,
 } from './stall.ts'
@@ -190,15 +187,15 @@ function requireTask(team: TeamState, taskId: string): TeamTask {
 /**
  * Deliver a durable member report to the live captain.
  *
- * Queue (default) becomes the next FIFO turn and does not abort in-flight
- * captain tools. Barge cancels the current turn first (`keepInbox`) so the
- * report starts immediately.
+ * Barge (default) cancels the current turn first (`keepInbox`) so a new
+ * instruction starts immediately. Queue becomes the next FIFO turn and does
+ * not abort in-flight captain tools.
  */
 export function deliverCaptainReport(
   captain: Pick<Agent, 'cancel' | 'followup'>,
   from: string,
   content: string,
-  mode: TeamDeliveryMode = 'queue',
+  mode: TeamDeliveryMode = 'barge',
 ): boolean {
   try {
     if (mode === 'barge') captain.cancel({ kind: 'parent' }, { keepInbox: true })
@@ -251,10 +248,10 @@ export function resolveMemberSpawnBrief(args: {
   return brief
 }
 
-/** Parse the live-delivery mode. Default is queue so in-flight tools survive. */
+/** Parse the live-delivery mode. Default is barge so new instructions start now. */
 export function parseDeliveryMode(value: string | undefined): TeamDeliveryMode {
-  if (value === undefined || value.trim() === '' || value === 'queue') return 'queue'
-  if (value === 'barge') return 'barge'
+  if (value === undefined || value.trim() === '' || value === 'barge') return 'barge'
+  if (value === 'queue') return 'queue'
   throw new Error(`delivery mode must be "queue" or "barge", got "${value}"`)
 }
 
@@ -276,39 +273,6 @@ function installMemberStallWatcher(ctx: Context, config: ToolsConfig): void {
     if (status !== 'idle') return
     void notifyCaptainOfMemberStall(ctx, config, agent)
   })
-  ctx.on('agent/session-start', ({ agent, source }) => {
-    if (source !== 'resume') return
-    void wakeParkedMembersOnCaptainResume(ctx, config, agent)
-  })
-}
-
-/**
- * Queue a continue wake to every member that still owns claimed work when
- * the captain session itself resumes. Failures stay in the plugin log.
- */
-async function wakeParkedMembersOnCaptainResume(ctx: Context, config: ToolsConfig, agent: Agent): Promise<void> {
-  try {
-    const workspace = workspaceOf(agent, config.stateDir)
-    const stateRoot = stateRootOf(workspace, config)
-    const team = await findTeamByCaptain(stateRoot, agent.id)
-    if (team === undefined) return
-    const names = membersToWakeOnCaptainResume(team.members.map((member) => ({
-      name: member.name,
-      id: member.id,
-      status: member.status,
-      activity: member.id === '' ? 'inactive' : turnActivityOf(ctx, member.id),
-      openTaskIds: assignedOpenTasks(team, member.name).map((task) => task.id),
-    })))
-    for (const name of names) {
-      const member = requireMember(team, name)
-      if (member.id === '') continue
-      const openTaskIds = assignedOpenTasks(team, member.name).map((task) => task.id)
-      const text = memberWakeText(stateRoot, team, member.name, captainResumeWakeText(openTaskIds))
-      await deliverToMember(ctx, agent, member.id, text, new AbortController().signal, 'queue')
-    }
-  } catch (error: unknown) {
-    ctx.logger.warn(`agent-teams: captain-resume wake failed: ${String(error)}`)
-  }
 }
 
 /**
@@ -928,12 +892,12 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
 
   ctx.tools.register(defineTool({
     name: 'agent_teams_send_message',
-    description: 'Send a message to the captain or to a teammate. Messages go straight into the recipient\'s mailbox. Default live delivery is queue: a running recipient finishes the current turn, then the message starts. Pass mode=barge only to interrupt immediately. No relay is involved: teammates talk to each other directly, exactly like the Claude Code AgentTeams mailbox model.',
+    description: 'Send a message to the captain or to a teammate. Messages go straight into the recipient\'s mailbox. Default live delivery barges in: a running recipient is interrupted so the new instruction starts immediately. Pass mode=queue only when the current turn must finish first. Do not send a blind "please continue" reminder. No relay is involved: teammates talk to each other directly, exactly like the Claude Code AgentTeams mailbox model.',
     parameters: {
       to: { type: 'string', required: true, description: 'Recipient: "captain" or a member name.' },
       content: { type: 'string', required: true, description: 'The message text.' },
       from: { type: 'string', description: 'Sender (defaults to the caller: the captain, or the calling member).' },
-      mode: { type: 'string', enum: ['queue', 'barge'], description: 'queue (default) waits for the current turn. barge interrupts it so the message starts immediately.' },
+      mode: { type: 'string', enum: ['queue', 'barge'], description: 'barge (default) interrupts the current turn. queue waits for it to finish.' },
     },
     output: {
       schema: {
