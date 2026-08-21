@@ -40,5 +40,5 @@ export function isReadOnlyRole(role: string | undefined, readOnlyRoles: readonly
  * @returns the read-only working-rule sentence.
  */
 export function readOnlyPersonaRule(): string {
-  return '7. You are a READ-ONLY member: file writes, edits, and shell commands are denied by policy. Report findings, evidence, and recommendations through task output and messages instead of modifying anything.'
+  return 'You are a READ-ONLY member: file writes, edits, and shell commands are denied by policy. Report findings, evidence, and recommendations through task output and messages instead of modifying anything.'
 }

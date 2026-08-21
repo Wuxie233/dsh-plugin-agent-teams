@@ -35,6 +35,8 @@ import {
   writeTeam,
 } from './state.ts'
 import {
+  assignedOpenTasks,
+  assignedWorkBlock,
   deliverToMember,
   installMemberSelectionRuntime,
   interruptMember,
@@ -43,6 +45,7 @@ import {
   retireMember,
   spawnMember,
   type MemberRuntimeConfig,
+  type TeamDeliveryMode,
 } from './members.ts'
 import {
   executeTeamReportIssue,
@@ -50,6 +53,7 @@ import {
   type IssueKind,
   type IssueSeverity,
 } from './report-issue.ts'
+import { lastMatchingStallNotice, lastTurnEndKind, shouldNotifyMemberStall, stallCaptainMessage } from './stall.ts'
 import type { TeamMember, TeamState, TeamTask } from './types.ts'
 
 /** Resolved plugin config consumed by the tools. */
@@ -176,19 +180,20 @@ function requireTask(team: TeamState, taskId: string): TeamTask {
 }
 
 /**
- * Barge a durable member report into the live captain immediately.
+ * Deliver a durable member report to the live captain.
  *
- * A running captain is cancelled first (`keepInbox`) so the report starts a
- * new turn instead of waiting at the next step or behind the current
- * orchestration turn. An idle captain just receives the follow-up.
+ * Queue (default) becomes the next FIFO turn and does not abort in-flight
+ * captain tools. Barge cancels the current turn first (`keepInbox`) so the
+ * report starts immediately.
  */
-export function bargeCaptainReport(
+export function deliverCaptainReport(
   captain: Pick<Agent, 'cancel' | 'followup'>,
   from: string,
   content: string,
+  mode: TeamDeliveryMode = 'queue',
 ): boolean {
   try {
-    captain.cancel({ kind: 'parent' }, { keepInbox: true })
+    if (mode === 'barge') captain.cancel({ kind: 'parent' }, { keepInbox: true })
     captain.followup(createUserMessage({
       content: [{ type: 'text', text: `AgentTeams message from member ${from}:\n\n${content}` }],
       source: { kind: 'plugin', plugin: 'dsh-agent-teams' },
@@ -201,12 +206,137 @@ export function bargeCaptainReport(
 }
 
 /**
+ * Barge a durable member report into the live captain immediately.
+ * @deprecated Use {@link deliverCaptainReport} with `mode: 'barge'`.
+ */
+export function bargeCaptainReport(
+  captain: Pick<Agent, 'cancel' | 'followup'>,
+  from: string,
+  content: string,
+): boolean {
+  return deliverCaptainReport(captain, from, content, 'barge')
+}
+
+/** First non-empty string among optional spawn-brief fields. */
+function firstNonEmpty(...values: Array<string | undefined>): string {
+  for (const value of values) {
+    const trimmed = value?.trim()
+    if (trimmed !== undefined && trimmed !== '') return trimmed
+  }
+  return ''
+}
+
+/**
+ * Resolve the first-turn brief for a new member. `prompt` is the documented
+ * field; `brief` / `instructions` / `task_description` / `task_subject` cover
+ * XML argument drops that otherwise fail as "missing required property prompt".
+ */
+export function resolveMemberSpawnBrief(args: {
+  prompt?: string
+  brief?: string
+  instructions?: string
+  task_description?: string
+  task_subject: string
+}): string {
+  const brief = firstNonEmpty(args.prompt, args.brief, args.instructions, args.task_description, args.task_subject)
+  if (brief === '') throw new Error('spawn brief must not be empty — pass prompt, brief, instructions, task_description, or task_subject')
+  return brief
+}
+
+/** Parse the live-delivery mode. Default is queue so in-flight tools survive. */
+export function parseDeliveryMode(value: string | undefined): TeamDeliveryMode {
+  if (value === undefined || value.trim() === '' || value === 'queue') return 'queue'
+  if (value === 'barge') return 'barge'
+  throw new Error(`delivery mode must be "queue" or "barge", got "${value}"`)
+}
+
+/** Prefix every member wake with the live assigned-work snapshot. */
+function memberWakeText(stateRoot: string, team: TeamState, recipient: string, senderText: string): string {
+  const assigned = assignedWorkBlock(team, recipient)
+  const assignedBlock = assigned === ''
+    ? 'You currently have no claimed or in_progress tasks.'
+    : assigned
+  return `AgentTeams state policy: inspect ${join(stateRoot, team.id)} read-only; never edit team.json or inbox files directly. Use agent_teams_* tools for team state.\n\n${assignedBlock}\n\n${senderText}`
+}
+
+/**
+ * Wake the captain when a member goes idle after an interrupted turn while
+ * still owning claimed work and holding an empty inbox.
+ */
+function installMemberStallWatcher(ctx: Context, config: ToolsConfig): void {
+  ctx.on('agent/status', ({ agent, status }) => {
+    if (status !== 'idle') return
+    void notifyCaptainOfMemberStall(ctx, config, agent)
+  })
+}
+
+/**
+ * Inspect one idle agent and, when it is a stalled member, persist a captain
+ * mailbox line and queue a live follow-up. Failures stay in the plugin log.
+ */
+async function notifyCaptainOfMemberStall(ctx: Context, config: ToolsConfig, agent: Agent): Promise<void> {
+  try {
+    const workspace = workspaceOf(agent, config.stateDir)
+    const stateRoot = stateRootOf(workspace, config)
+    const team = await findTeamByParticipant(stateRoot, agent.id)
+    if (team === undefined) return
+    const member = team.members.find((candidate) => candidate.id === agent.id && candidate.status !== 'removed')
+    if (member === undefined) return
+    const open = assignedOpenTasks(team, member.name)
+    const openTaskIds = open.map((task) => task.id)
+    const inbox = await readMailbox(stateRoot, team.id, CAPTAIN_KEY)
+    const verdict = shouldNotifyMemberStall({
+      memberStatus: member.status,
+      activity: agent.status,
+      lastTurnEndKind: lastTurnEndKind(agent.session.events),
+      openTaskIds,
+      pendingInbox: agent.inbox.hasPending,
+      lastStallNotice: lastMatchingStallNotice(inbox, member.name, openTaskIds),
+    })
+    if (!verdict.notify) return
+    const content = stallCaptainMessage(member.name, openTaskIds)
+    let filed = false
+    await withTeamLock(teamLockKey(stateRoot, team.id), async () => {
+      const fresh = await requireFreshTeam(stateRoot, team.id)
+      const stillOpen = assignedOpenTasks(fresh, member.name).map((task) => task.id)
+      const lockedInbox = await readMailbox(stateRoot, fresh.id, CAPTAIN_KEY)
+      const locked = shouldNotifyMemberStall({
+        memberStatus: member.status,
+        activity: agent.status,
+        lastTurnEndKind: lastTurnEndKind(agent.session.events),
+        openTaskIds: stillOpen,
+        pendingInbox: agent.inbox.hasPending,
+        lastStallNotice: lastMatchingStallNotice(lockedInbox, member.name, stillOpen),
+      })
+      if (!locked.notify) return
+      const message = createMessage(member.name, CAPTAIN_KEY, content)
+      await appendMailbox(stateRoot, fresh.id, CAPTAIN_KEY, message)
+      appendTeamEvent(ctx, captainSessionOf(ctx, fresh.captainSessionId, agent.session), 'agent-teams/message-sent', {
+        teamId: fresh.id,
+        messageId: message.id,
+        from: member.name,
+        to: CAPTAIN_KEY,
+        content,
+        ts: message.ts,
+      })
+      filed = true
+    })
+    if (!filed) return
+    const captain = ctx.agents.get(team.captainSessionId as SessionId)
+    if (captain !== undefined) deliverCaptainReport(captain, member.name, content, 'queue')
+  } catch (error: unknown) {
+    ctx.logger.warn(`agent-teams: stall notify failed: ${String(error)}`)
+  }
+}
+
+/**
  * Register every `agent_teams_*` tool into the shared tools registry.
  * @param ctx - the plugin context (injects `tools`).
  * @param config - resolved tool config.
  */
 export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void {
   const memberSelections = installMemberSelectionRuntime(ctx, config.stateDir)
+  installMemberStallWatcher(ctx, config)
 
   ctx.tools.register(defineTool({
     name: 'agent_teams_create',
@@ -288,13 +418,15 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
 
   ctx.tools.register(defineTool({
     name: 'agent_teams_add_member',
-    description: 'Add a durable continuable member and start its first claimed task in the same call. Spawn members before creating later tasks for them. The spawn prompt is that first task, not a greeting — prompt is required. By default it snapshots the captain\'s current LLM provider, model, and reasoning effort. Supply provider/model only for an explicitly requested role-specific route.',
+    description: 'Add a durable continuable member and start its first claimed task in the same call. Spawn members before creating later tasks for them. The spawn brief is that first task, not a greeting. Prefer `prompt`; if that field is dropped, brief / instructions / task_description / task_subject are accepted. By default it snapshots the captain\'s current LLM provider, model, and reasoning effort. Supply provider/model only for an explicitly requested role-specific route.',
     parameters: {
       name: { type: 'string', required: true, description: 'Unique member name inside the team.' },
       role: { type: 'string', description: 'Role of the member (e.g. researcher, engineer, reviewer).' },
-      task_subject: { type: 'string', required: true, description: 'Brief title for the member\'s first task.' },
-      task_description: { type: 'string', description: 'What the first task needs done.' },
-      prompt: { type: 'string', required: true, description: 'First-turn instructions. This is the member\'s first user message; do not send a separate welcome.' },
+      task_subject: { type: 'string', required: true, description: 'Brief title for the member\'s first task. Also used as the spawn brief when prompt is omitted.' },
+      task_description: { type: 'string', description: 'What the first task needs done. Also used as the spawn brief when prompt is omitted.' },
+      prompt: { type: 'string', description: 'First-turn instructions. This is the member\'s first user message; do not send a separate welcome.' },
+      brief: { type: 'string', description: 'Alias for prompt when the model cannot emit that field name.' },
+      instructions: { type: 'string', description: 'Alias for prompt when the model cannot emit that field name.' },
       task_id: { type: 'string', description: 'Existing pending task to claim as the first task. Omit to create one from task_subject.' },
       dependencies: {
         type: 'array',
@@ -304,6 +436,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
       provider: { type: 'string', description: 'Optional LLM provider route. Use only when the user explicitly requests a different provider; requires model.' },
       model: { type: 'string', description: 'Optional model override. Omit for the captain\'s current model (or the configured memberModel default).' },
       worktree: { type: 'string', description: 'Optional absolute path of an existing git worktree the captain created (git worktree add). The member is spawned inside it for write isolation; read-only roles refuse it. Merging and removing the worktree stay captain-owned git operations.' },
+      cwd: { type: 'string', description: 'Optional absolute working directory for this member. Use when the captain session sits on an umbrella workspace and the member must stay inside one repo. If it differs from the captain workspace, a captain-pointer is written. When both cwd and worktree are set they must be the same path.' },
     },
     output: {
       schema: {
@@ -363,8 +496,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           model: args.model,
           defaultModel: config.memberModel,
         }, exec.signal)
-        const brief = args.prompt.trim()
-        if (brief === '') throw new Error('prompt must not be empty — the first turn is the first assigned task')
+        const brief = resolveMemberSpawnBrief(args)
         const subject = args.task_subject.trim()
         if (subject === '') throw new Error('task_subject must not be empty')
         let createdFirstTask = false
@@ -431,7 +563,15 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           firstTask,
           brief,
           args.worktree,
+          args.cwd,
         )
+        if (firstTask.status === 'claimed') {
+          const started = transitionError(firstTask.status, 'in_progress')
+          if (started === undefined) {
+            firstTask.status = 'in_progress'
+            firstTask.updatedAt = Date.now()
+          }
+        }
         fresh.members.push(member)
         await writeTeam(stateRoot, fresh)
         appendTeamEvent(ctx, captainSessionOf(ctx, fresh.captainSessionId, captain.session), 'agent-teams/member-added', {
@@ -747,11 +887,12 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
 
   ctx.tools.register(defineTool({
     name: 'agent_teams_send_message',
-    description: 'Send a message to the captain or to a teammate. Messages go straight into the recipient\'s mailbox; live delivery barges in — a running recipient is interrupted and the message starts immediately instead of waiting behind the current turn. No relay is involved: teammates talk to each other directly, exactly like the Claude Code AgentTeams mailbox model.',
+    description: 'Send a message to the captain or to a teammate. Messages go straight into the recipient\'s mailbox. Default live delivery is queue: a running recipient finishes the current turn, then the message starts. Pass mode=barge only to interrupt immediately. No relay is involved: teammates talk to each other directly, exactly like the Claude Code AgentTeams mailbox model.',
     parameters: {
       to: { type: 'string', required: true, description: 'Recipient: "captain" or a member name.' },
       content: { type: 'string', required: true, description: 'The message text.' },
       from: { type: 'string', description: 'Sender (defaults to the caller: the captain, or the calling member).' },
+      mode: { type: 'string', enum: ['queue', 'barge'], description: 'queue (default) waits for the current turn. barge interrupts it so the message starts immediately.' },
     },
     output: {
       schema: {
@@ -761,7 +902,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           message_id: { type: 'string', required: true },
           from: { type: 'string', required: true },
           to: { type: 'string', required: true },
-          delivered: { type: 'string', required: true, description: 'live (barged into the live captain), wake (barged into the member), or mailbox (durable inbox only).' },
+          delivered: { type: 'string', required: true, description: 'live (queued or barged into the live captain), wake (queued or barged into the member), or mailbox (durable inbox only).' },
         },
       },
       render: (args, value) => [{
@@ -775,6 +916,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
       const stateRoot = stateRootOf(workspace, config)
       const team = await requireParticipantTeam(workspace, config, caller)
       const to = args.to.trim()
+      const mode = parseDeliveryMode(args.mode)
       const prepared = await withTeamLock(teamLockKey(stateRoot, team.id), async () => {
         const { team: fresh, identity } = await requireFreshParticipant(stateRoot, team.id, caller.id)
         const from = identity.name
@@ -816,7 +958,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
       if (prepared.kind === 'captain') {
         let delivered: 'live' | 'mailbox' = 'mailbox'
         if (captain !== undefined && prepared.identity.kind === 'member') {
-          delivered = bargeCaptainReport(captain, prepared.from, args.content) ? 'live' : 'mailbox'
+          delivered = deliverCaptainReport(captain, prepared.from, args.content, mode) ? 'live' : 'mailbox'
         }
         return { message_id: prepared.message.id, from: prepared.from, to: CAPTAIN_KEY, delivered }
       }
@@ -825,8 +967,8 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
         const senderText = prepared.from === CAPTAIN_KEY
           ? args.content
           : `Message from team member ${prepared.from}:\n\n${args.content}`
-        const text = `AgentTeams state policy: inspect ${join(stateRoot, prepared.fresh.id)} read-only; never edit team.json or inbox files directly. Use agent_teams_* tools for team state.\n\n${senderText}`
-        const accepted = await deliverToMember(ctx, captain, prepared.recipient.id, text, exec.signal)
+        const text = memberWakeText(stateRoot, prepared.fresh, prepared.recipient.name, senderText)
+        const accepted = await deliverToMember(ctx, captain, prepared.recipient.id, text, exec.signal, mode)
         delivered = accepted ? 'wake' : 'mailbox'
       }
       return {
@@ -868,6 +1010,14 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           status: member.status,
           activity: member.id !== '' ? (activity.get(member.id) ?? 'unknown') : 'unspawned',
         }))
+      const assigned_work = identity.kind === 'member'
+        ? assignedOpenTasks(team, identity.name).map((task) => ({
+          id: task.id,
+          subject: task.subject,
+          status: task.status,
+          ...task.description === undefined ? {} : { description: task.description },
+        }))
+        : []
       const tasks = team.tasks.map((task) => ({
         id: task.id,
         subject: task.subject,
@@ -911,6 +1061,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
         description: team.description ?? '',
         viewer: identity.name,
         members,
+        assigned_work,
         tasks,
         captain_inbox: captainInbox.slice(-10).map((message) => ({
           from: message.from,
@@ -1036,6 +1187,7 @@ function renderStatus(value: JsonValue): string {
     team_name: string
     description?: string
     viewer: string
+    assigned_work?: { id: string; subject: string; status: string; description?: string }[]
     members: {
       name: string
       role: string
@@ -1055,6 +1207,14 @@ function renderStatus(value: JsonValue): string {
   const lines: string[] = [
     `Team "${team.team_name}"${team.description ? ` — ${team.description}` : ''}`,
     `Viewing as: ${team.viewer}`,
+    ...(team.assigned_work !== undefined && team.assigned_work.length > 0
+      ? [
+        `Your assigned work (${team.assigned_work.length}):`,
+        ...team.assigned_work.map((task) => `  - ${task.id} [${task.status}] ${task.subject}`),
+      ]
+      : team.viewer === CAPTAIN_KEY
+        ? []
+        : ['Your assigned work: none — only then may you wait for the captain.']),
     `Members (${team.members.length}):`,
     ...team.members.map((member) => {
       const route = member.provider && member.model ? ` · ${member.provider}/${member.model}` : ''

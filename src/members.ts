@@ -4,7 +4,7 @@
  *
  * Members are durable continuable subagents of the captain, so a member keeps
  * its conversation across turns and across harness restarts: the captain
- * barges in with {@link deliverToMember}, it works through its turn
+ * queues or barges in with {@link deliverToMember}, it works through its turn
  * (updating team state through the `agent_teams_*` tools), and becomes idle
  * again. Its final assistant message is not readable programmatically, so the
  * member persists its report into the captain's mailbox and the task records,
@@ -250,6 +250,37 @@ export function installMemberSelectionRuntime(ctx: Context, stateDir: string): M
   }
 }
 
+/** Statuses that still own a member's attention. */
+const OPEN_TASK_STATUSES: ReadonlySet<TeamTask['status']> = new Set(['claimed', 'in_progress'])
+
+/**
+ * Open claimed/in_progress tasks assigned to one member, in board order.
+ * @param team - the live team record.
+ * @param memberName - the member's team name.
+ * @returns that member's unfinished owned tasks.
+ */
+export function assignedOpenTasks(team: TeamState, memberName: string): TeamTask[] {
+  return team.tasks.filter((task) => task.assignee === memberName && OPEN_TASK_STATUSES.has(task.status))
+}
+
+/**
+ * Compact text listing one member's open work. Empty when nothing is assigned.
+ * @param team - the live team record.
+ * @param memberName - the member's team name.
+ * @returns a heading plus one line per open task, or an empty string.
+ */
+export function assignedWorkBlock(team: TeamState, memberName: string): string {
+  const open = assignedOpenTasks(team, memberName)
+  if (open.length === 0) return ''
+  const lines = open.map((task) => {
+    const description = task.description === undefined || task.description === ''
+      ? ''
+      : ` — ${task.description}`
+    return `- ${task.id} [${task.status}] ${task.subject}${description}`
+  })
+  return `Your assigned work (claimed or in_progress):\n${lines.join('\n')}`
+}
+
 /**
  * The member's system prompt (persona), shadowing the deployment persona for
  * that child. Self-contained: it replaces the whole persona section.
@@ -257,25 +288,37 @@ export function installMemberSelectionRuntime(ctx: Context, stateDir: string): M
  * @param member - the member record (name/role are read before spawning).
  * @param stateDir - configured state directory, so the member can locate the
  *   team files with its own file tools.
+ * @param readOnlyRoles - role tokens that additionally deny write tools.
+ * @param workspaceRoot - absolute working directory the member must stay in.
  */
-export function memberPersona(team: TeamState, member: TeamMember, stateDir: string, readOnlyRoles: readonly string[] = []): string {
+export function memberPersona(
+  team: TeamState,
+  member: TeamMember,
+  stateDir: string,
+  readOnlyRoles: readonly string[] = [],
+  workspaceRoot?: string,
+): string {
+  const workspaceLine = workspaceRoot === undefined
+    ? ''
+    : `\n- Workspace root: ${workspaceRoot}. Stay inside it. Do not search, read, or write sibling repositories.`
   return `You are ${member.name}, a member of the multi-agent team "${team.name}" running inside DeepSeek Harness AgentTeams. The captain leads the team; you are a worker member${member.role ? ` with the role: ${member.role}` : ''}.
 
 Team context:
 - Team id: ${team.id}
 - Your name inside the team (use it as \`from\`/identity): ${member.name}
 - The team state lives under ${stateDir}/${team.id}/ (team.json and inbox/*.jsonl). You may inspect these files read-only for diagnostics, but never edit them directly; use the agent_teams_* tools so JSON escaping and concurrent updates stay safe.
-- The captain and your teammates reach you through messages. Each message you receive is a new turn: act on it and end your turn with a concise reply.
+- The captain and your teammates reach you through messages. Each message you receive is a new turn: act on it and end your turn with a concise reply.${workspaceLine}
 
 Working rules:
 1. Call agent_teams_status at the start of every turn. That snapshot is the only source of truth for your tasks. Do not trust this persona or an earlier turn if they disagree with the live status.
 2. Your first user message is already the first assigned task. Work that task. Later turns come from agent_teams_send_message. You may complete a claimed task directly (status=completed + output); in_progress is optional.
-3. Work thoroughly with your available tools; do not cut corners.
-4. When finished, call agent_teams_update_task with status=completed and a concise \`output\` summarizing what you did and the key results.
-5. Send a short report to the captain with agent_teams_send_message (to=captain) when you complete a task or hit a blocker.
-6. To ask a teammate something, use agent_teams_send_message with to=<teammate name>; the message barges into their current turn. The same applies to the captain (to=captain).
-7. You are a worker: do not create or delete teams, and do not add or remove members — that is the captain's job.
-8. If agent_teams_status says you do not belong to an active team, stop. Do not keep reporting old blockers.${isReadOnlyRole(member.role, readOnlyRoles) ? `\n${readOnlyPersonaRule()}` : ''}`
+3. If status lists claimed or in_progress tasks assigned to you, that is your work. Never say you are waiting for assignment while those exist.
+4. Work thoroughly with your available tools; do not cut corners.
+5. When finished, call agent_teams_update_task with status=completed and a concise \`output\` summarizing what you did and the key results.
+6. Send a short report to the captain with agent_teams_send_message (to=captain) when you complete a task or hit a blocker.
+7. To ask a teammate something, use agent_teams_send_message with to=<teammate name>. The same applies to the captain (to=captain).
+8. You are a worker: do not create or delete teams, and do not add or remove members — that is the captain's job.
+9. If agent_teams_status says you do not belong to an active team, stop. Do not keep reporting old blockers.${isReadOnlyRole(member.role, readOnlyRoles) ? `\n${readOnlyPersonaRule()}` : ''}`
 }
 
 /**
@@ -285,14 +328,25 @@ Working rules:
  * @param team - the team the member joined.
  * @param task - the claimed first task.
  * @param brief - captain instructions for that task.
+ * @param workspaceRoot - absolute working directory the member must stay in.
  */
-export function memberDispatchPrompt(team: TeamState, task: TeamTask, brief: string): string {
+export function memberDispatchPrompt(
+  team: TeamState,
+  task: TeamTask,
+  brief: string,
+  workspaceRoot?: string,
+): string {
   const description = task.description === undefined || task.description === ''
     ? ''
     : `\nDescription: ${task.description}`
+  const workspaceLine = workspaceRoot === undefined
+    ? ''
+    : `\nWorkspace root: ${workspaceRoot}. Stay inside this directory.`
+  const assigned = assignedWorkBlock(team, task.assignee ?? '')
+  const assignedBlock = assigned === '' ? '' : `\n${assigned}\n`
   return `You have joined the team "${team.name}" as ${task.assignee ?? 'a member'}.
-Your first turn is task ${task.id}: ${task.subject}.${description}
-
+Your first turn is task ${task.id}: ${task.subject}.${description}${workspaceLine}
+${assignedBlock}
 Captain brief:
 ${brief}
 
@@ -315,6 +369,7 @@ Call agent_teams_status, then do this task. Do not send a ready check-in.`
  * @param brief - captain instructions delivered as the first user message.
  * @param worktree - optional absolute git worktree the member is spawned
  *   inside for write isolation; read-only roles refuse it.
+ * @param cwd - optional absolute working directory when no worktree is used.
  */
 export async function spawnMember(
   ctx: Context,
@@ -329,6 +384,7 @@ export async function spawnMember(
   firstTask: TeamTask,
   brief: string,
   worktree?: string,
+  cwd?: string,
 ): Promise<void> {
   // Fail loud at the first use: provider registration is a sibling plugin's
   // effect and may settle after this plugin mounts. Capability checks here
@@ -351,6 +407,9 @@ export async function spawnMember(
   }
   // Optional chain: offline verification drives a partial captain fake.
   const captainWorkspace = captain.session.header?.cwd ?? process.cwd()
+  if (worktree !== undefined && cwd !== undefined && worktree !== cwd) {
+    throw new Error(`agent-teams: worktree and cwd must be the same path when both are set (worktree ${worktree}, cwd ${cwd})`)
+  }
   if (worktree !== undefined) {
     if (isReadOnlyRole(member.role, config.readOnlyRoles ?? [])) {
       throw new Error(`agent-teams: read-only role "${member.role}" cannot use a worktree; reviewers stay on the captain tree`)
@@ -362,6 +421,15 @@ export async function spawnMember(
       throw new Error(`agent-teams: member worktree has no .git entry (not a git worktree?): ${worktree}`)
     }
   }
+  if (cwd !== undefined) {
+    if (!isAbsolute(cwd)) {
+      throw new Error(`agent-teams: member cwd must be an absolute path, got "${cwd}"`)
+    }
+    if (!existsSync(cwd)) {
+      throw new Error(`agent-teams: member cwd does not exist: ${cwd}`)
+    }
+  }
+  const childCwd = worktree ?? cwd
   const label = `${MEMBER_LABEL_PREFIX}${team.id}:${member.name}`
   // Local seam: ContinuableStartSpec.cwd (patched dsh-subagent). rc.6 types
   // lack the field, so the intersection is assigned through the base shape.
@@ -370,13 +438,14 @@ export async function spawnMember(
     provider: config.provider,
     label,
     request: {
-      prompt: [{ type: 'text', text: memberDispatchPrompt(team, firstTask, brief) }],
+      prompt: [{ type: 'text', text: memberDispatchPrompt(team, firstTask, brief, childCwd) }],
       parent: captain,
       persona: memberPersona(
         team,
         member,
-        worktree !== undefined ? join(captainWorkspace, stateDir) : stateDir,
+        childCwd !== undefined && childCwd !== captainWorkspace ? join(captainWorkspace, stateDir) : stateDir,
         config.readOnlyRoles ?? [],
+        childCwd,
       ),
       toolFilter: { deny: memberDenyTools(member, config) },
       agentOptions: {
@@ -385,37 +454,42 @@ export async function spawnMember(
       },
       ...config.maxDepth !== undefined ? { maxDepth: config.maxDepth } : {},
     },
-    ...worktree !== undefined ? { cwd: worktree } : {},
+    ...childCwd !== undefined ? { cwd: childCwd } : {},
     signal,
   }
   const start = await selections.withPending(captain.id, label, llmSelection, () => (
     ctx.subagents.startContinuable(startSpec as ContinuableStartInput)
   ))
-  if (worktree !== undefined) {
+  if (childCwd !== undefined) {
     // Fail loud when the runtime ignored the cwd override: an unpatched
     // dsh-subagent silently spawns the member on the captain tree, which
-    // defeats the requested write isolation.
+    // defeats the requested workspace pin.
     const liveChild = ctx.agents.get(start.childId)
     const headerCwd = liveChild?.session.header.cwd
-    if (headerCwd !== undefined && headerCwd !== worktree) {
+    if (headerCwd !== undefined && headerCwd !== childCwd) {
       interruptMember(ctx, captain, start.childId)
       throw new Error(
-        `agent-teams: the harness runtime did not apply the member worktree cwd (header says "${headerCwd}") — `
+        `agent-teams: the harness runtime did not apply the member cwd (header says "${headerCwd}") — `
         + 'the deployed dsh-subagent lacks the child-cwd seam; redeploy the patched deployment and restart dsh web',
       )
     }
-    await writeCaptainPointer(worktree, stateDir, { captainWorkspace, teamId: team.id })
+    if (childCwd !== captainWorkspace) {
+      await writeCaptainPointer(childCwd, stateDir, { captainWorkspace, teamId: team.id })
+    }
   }
   member.id = start.childId
   member.worktree = worktree
 }
 
+/** How a live team message reaches a running recipient. */
+export type TeamDeliveryMode = 'queue' | 'barge'
+
 /**
- * Deliver one message by barging into the member's current turn.
+ * Deliver one message to a member. Queue (default) becomes the next FIFO
+ * turn and does not abort in-flight tools. Barge interrupts the current
+ * turn first so the new message starts immediately.
  *
- * A running member is interrupted first (`keepInbox`) so the new message
- * starts immediately instead of waiting behind the current turn. Best
- * effort: a failure (member gone or not continuable) is logged and
+ * Best effort: a failure (member gone or not continuable) is logged and
  * reported as `false` so the caller can decide (mailbox delivery still
  * happened).
  *
@@ -428,6 +502,7 @@ export async function spawnMember(
  * @param childId - the member's durable child session id.
  * @param text - the message content.
  * @param signal - caller cancellation, forwarded to the delivery.
+ * @param mode - queue behind the current turn, or barge into it.
  * @returns whether the member inbox accepted the message.
  */
 export async function deliverToMember(
@@ -436,8 +511,9 @@ export async function deliverToMember(
   childId: string,
   text: string,
   signal: AbortSignal,
+  mode: TeamDeliveryMode = 'queue',
 ): Promise<boolean> {
-  interruptMember(ctx, captain, childId)
+  if (mode === 'barge') interruptMember(ctx, captain, childId)
   try {
     await ctx.subagents.followup(captain, brandedSessionId(childId), [{ type: 'text', text }], {
       source: { kind: 'plugin', plugin: 'dsh-agent-teams' },

@@ -65,12 +65,15 @@ export interface TeamActivitySnapshot {
   readonly captainInbox: readonly TeamActivityMessage[]
 }
 
-/** The current task of a member: its first unfinished owned task. */
+/** The current task of a member: first in_progress, else first claimed. */
 function currentTaskOf(memberName: string, tasks: readonly TeamTask[]): string {
+  let claimed = ''
   for (const task of tasks) {
-    if (task.status === 'in_progress' && task.assignee === memberName) return task.id
+    if (task.assignee !== memberName) continue
+    if (task.status === 'in_progress') return task.id
+    if (task.status === 'claimed' && claimed === '') claimed = task.id
   }
-  return ''
+  return claimed
 }
 
 /**

@@ -25,8 +25,15 @@
   task). create_task is for later work after the assignee exists, using
   returned `t1`/`t2` ids only. Keep the skill, usage prompt, and tool
   descriptions on that order.
-- Live team messages barge in. Do not route captain reports through
-  `steer()` or member wakes through a queued followup without interrupt.
+- Live team messages queue by default (`followup` only). Pass `mode=barge`
+  to interrupt. Do not restore barge as the default, and do not route
+  reports through `steer()`.
+- Optional `cwd` on add_member pins the child workspace. A cwd that is
+  not the captain workspace writes `captain-pointer.json`. When both
+  `cwd` and `worktree` are set they must be the same path.
+- An interrupted member that goes idle with open claimed/in_progress
+  tasks and an empty inbox queues a captain stall notice. Do not fail or
+  unclaim the task.
 - `agent_teams_delete` must retire members (`cancel` without keepInbox),
   not only interrupt the current turn. claimed → completed is legal.
 - Do not restore a greeting turn. `spawnMember` takes the first claimed

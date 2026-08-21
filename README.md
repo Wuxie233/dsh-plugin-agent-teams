@@ -71,7 +71,7 @@ Then ask for a team directly:
 1. The current session creates a team and becomes its captain.
 2. The captain adds role-specific members backed by continuable sub-agents. Each add creates and claims that member's first task.
 3. Later tasks use only returned ids (`t1`, `t2`, …) and assignees that already exist.
-4. Claimed tasks are dispatched through durable mailbox messages that wake each member.
+4. Claimed tasks are dispatched through durable mailbox messages. Delivery queues behind a running turn unless `mode=barge`.
 5. Members work, update task state, and report directly to the captain or one another.
 6. The captain presents the combined result, then archives the complete team record.
 

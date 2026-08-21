@@ -10,7 +10,7 @@
 |---|---|
 | `ctx.tools` 注册表 | 注册 10 个 `agent_teams_*` 工具（与 `tool-workflow` 同一注册路径） |
 | `ctx.subagents.startContinuable()` | 创建成员：durable 可续聊子代理，带成员 persona |
-| `ctx.subagents.interrupt()` + `followup()` / `Agent.cancel()` + `followup()` | 插嘴投递：先打断收件人当前轮次，再立刻投递新消息 |
+| `ctx.subagents.followup()`；可选 `interrupt()` / `Agent.cancel()` | 默认排队到下一轮；`mode=barge` 才打断当前轮次再立刻投递 |
 | `ctx.subagents.listChildren()` + `ctx.agents.get().status` | 查询成员是否正在跑一轮（store 里的 `running` 只表示会话还在内存，停掉的对话仍可能是 `running`） |
 | `ctx.systemPrompt.section()` | 注册"AgentTeams 使用策略"提示段 |
 | Web server 路由注册 | 活动面板数据路由 `/plugins/dsh-agent-teams/state` + 鲸鱼图片静态服务（`webServer`/`httpServer` 双键兼容，见下） |
@@ -45,19 +45,19 @@
 | 工具 | 作用 |
 |---|---|
 | `agent_teams_create` | 创建团队，调用者成为队长（一个队长同时只带一个团队） |
-| `agent_teams_add_member` | 拉成员入队并立刻派发第一份任务（出生 prompt 就是这份任务，不是欢迎轮） |
+| `agent_teams_add_member` | 拉成员入队并立刻派发第一份任务（出生 brief 就是这份任务，不是欢迎轮；`prompt` 可用 `brief`/`instructions`/`task_description` 兜底；可选 `cwd` 钉死工作区） |
 | `agent_teams_remove_member` | 移除成员（尽力打断其当前轮次） |
 | `agent_teams_create_task` | 给**已存在**的成员创建后续任务；`assignee` 必须是在册成员；`dependencies` 只能用先前返回的 `t1`/`t2`/… |
 | `agent_teams_claim_task` | 领取任务（校验依赖；队长可代领，成员只能领自己的/未指派的） |
 | `agent_teams_update_task` | 推进任务状态并写入 `output` 结果 |
-| `agent_teams_send_message` | 任意成员→任意成员/队长：消息直达对方邮箱并插嘴投递（打断当前轮次后立刻开始；无队长转发；拒绝冒名 `from`） |
+| `agent_teams_send_message` | 任意成员→任意成员/队长：消息直达对方邮箱；默认排队到收件人下一轮，`mode=barge` 才打断当前轮次；无队长转发；拒绝冒名 `from` |
 | `agent_teams_status` | 团队全景：成员活动、任务清单、队长邮箱、各成员待读消息 |
 | `agent_teams_delete` | 结束团队：打断成员并清空其排队消息，团队目录**归档保留**（任务与依赖图、邮箱完整留存） |
 | `agent_teams_report_issue` | 队长或未建队会话把插件缺陷报到 `Wuxie233/dsh-plugin-agent-teams`；成员不可见也不可用 |
 
-`agent_teams_add_member` 必须带上第一份任务：`task_subject` + `prompt`。runtime 要求 spawn 时提交一条 user prompt，所以这条 prompt 就是成员的第一轮，不再单独欢迎。也可以传已有的 `task_id` 来认领。默认不需要模型参数：它会快照队长当前请求真正生效的 LLM provider、model 与思考强度。用户明确要求某个角色使用其他模型时，可以同时传入可选的 `provider` + `model`；只覆盖 `model` 时沿用队长当前 LLM provider。插件不会为每个成员发起二次选择或弹窗，也不暴露逐成员思考强度参数。
+`agent_teams_add_member` 必须带上第一份任务：`task_subject`，以及一份 spawn brief。文档字段是 `prompt`；如果模型发不出这个字段名，`brief` / `instructions` / `task_description` / `task_subject` 都可以顶上。runtime 要求 spawn 时提交一条 user prompt，所以这份 brief 就是成员的第一轮，不再单独欢迎。也可以传已有的 `task_id` 来认领。默认不需要模型参数：它会快照队长当前请求真正生效的 LLM provider、model 与思考强度。用户明确要求某个角色使用其他模型时，可以同时传入可选的 `provider` + `model`；只覆盖 `model` 时沿用队长当前 LLM provider。插件不会为每个成员发起二次选择或弹窗，也不暴露逐成员思考强度参数。
 
-可选参数 `worktree` 是队长已经建好的 git worktree 绝对路径。成员出生在这棵树里，cwd 在 spawn 时冻结；只读角色拒绝该参数。团队状态仍写在队长工作区的 `.agent-teams/`，成员树里只有一个 `captain-pointer.json` 把工具解析指回去。建树、合并、删除 worktree 都是队长的 git 操作，插件不管生命周期。默认不要传：写者共享队长工作区、靠独占路径并行。
+可选参数 `cwd` 是成员工作目录的绝对路径。队长会话停在伞目录（例如 `/root/CODE`）时，把目标仓库绝对路径传进来，成员就不会去翻兄弟仓库。`cwd` 不等于队长工作区时会写 `captain-pointer.json`。可选参数 `worktree` 是队长已经建好的 git worktree 绝对路径，要求目录里有 `.git`，只读角色拒绝。两者同时传时必须是同一条路径。建树、合并、删除 worktree 都是队长的 git 操作，插件不管生命周期。默认不要传：写者共享队长工作区、靠独占路径并行。
 
 ## 配置
 
@@ -77,11 +77,11 @@
 
 ## 使用协议
 
-插件提示段会指导模型按协议执行：建团队 → 按角色拉成员并带上第一份任务 brief（出生即开工）→ 成员存在后再用返回的 `t1`/`t2`/… 拆后续任务 → 后续轮次用 `agent_teams_send_message` 插嘴投递 → 轮询 `agent_teams_status` 收集产出 → 汇报后 `agent_teams_delete`。成员之间可以直接互发消息，无需队长中转。不要先给还不存在的人 `create_task`，也不要发明 `task-1`。
+插件提示段会指导模型按协议执行：建团队 → 按角色拉成员并带上第一份任务 brief（出生即开工）→ 成员存在后再用返回的 `t1`/`t2`/… 拆后续任务 → 后续轮次用 `agent_teams_send_message` 排队投递（默认不打断；催办才 `mode=barge`）→ 成员报告和 stall 通知叫醒队长 → 汇报后 `agent_teams_delete`。成员之间可以直接互发消息，无需队长中转。不要先给还不存在的人 `create_task`，也不要发明 `task-1`。
 
 ## 已知限制
 
-- 成员在收到消息后才行动，没有常驻轮询。在线投递会打断收件人当前轮次再立刻开始新一轮；队长离线时消息留在邮箱、待下次在线时投递。
+- 成员在收到消息后才行动，没有常驻轮询。在线投递默认排队到收件人下一轮；`mode=barge` 才打断当前轮次。被 interrupt 后若仍占着 claimed/in_progress 任务且 inbox 为空，会给队长发一条 stall 通知，任务不会被自动失败或取消认领。队长离线时消息留在邮箱、待下次在线时投递。
 - 一个队长同时只能带一个团队（与 Claude Code AgentTeams 一致）。
 - 成员 persona 替换部署默认 persona。写者默认拥有完整工具集；只读角色在 spawn 时被拒绝 `write` / `edit` / `bash`。
 - 可选成员 worktree 依赖本机打过 cwd 缝的 runtime；缝没打上时 spawn 会 fail loud 并打断该成员，不会静默写回队长树。deployment 的 `pnpm install` 会冲掉这份缝。
