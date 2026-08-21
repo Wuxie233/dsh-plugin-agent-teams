@@ -17,8 +17,8 @@
 - Host-half changes need a dsh web restart; client-half only a page refresh.
 - The conversation card folds create/add_member/remove_member
   `tool/result.meta` onto one team id. Do not hardcode `members: []`.
-  Snapshot polls may enrich live activity; a failed poll must keep the
-  folded roster.
+  The activity panel is the only `/plugins/dsh-agent-teams/state` poller;
+  cards read the shared snapshot. A missing snapshot keeps the folded roster.
 - The activity panel stays collapsed until the user opens it (corner
   badge or conversation card). Do not reintroduce auto-expand.
 - Captain protocol: add_member first (required prompt, first claimed
@@ -34,6 +34,8 @@
 - An interrupted member that goes idle with open claimed/in_progress
   tasks and an empty inbox queues a captain stall notice. Do not fail or
   unclaim the task.
+- Captain session resume (`agent/session-start` source=resume) queues a
+  continue wake to members that still own claimed or in_progress work.
 - `agent_teams_delete` must retire members (`cancel` without keepInbox),
   not only interrupt the current turn. claimed → completed is legal.
 - Do not restore a greeting turn. `spawnMember` takes the first claimed

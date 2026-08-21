@@ -99,3 +99,35 @@ export function lastMatchingStallNotice(
 export function stallCaptainMessage(memberName: string, openTaskIds: readonly string[]): string {
   return `Member ${memberName} went idle after an interrupted turn while still owning ${openTaskIds.join(', ')}. No pending inbox. Resume with agent_teams_send_message (queue) or reassign.`
 }
+
+/** One member row used to decide captain-resume wakes. */
+export interface ResumeMember {
+  readonly name: string
+  readonly id: string
+  readonly status: string
+  /** Live driver status: running members already have a turn. */
+  readonly activity?: string
+  readonly openTaskIds: readonly string[]
+}
+
+/**
+ * Members that still own claimed/in_progress work after the captain session
+ * resumes. Running members and empty boards stay parked.
+ * @param members - live (non-removed) members with their open task ids.
+ * @returns names that should receive a queued resume wake.
+ */
+export function membersToWakeOnCaptainResume(members: readonly ResumeMember[]): string[] {
+  return members
+    .filter((member) => (
+      member.status !== 'removed'
+      && member.id !== ''
+      && member.activity !== 'running'
+      && member.openTaskIds.length > 0
+    ))
+    .map((member) => member.name)
+}
+
+/** Queued follow-up that restarts parked claimed work after captain resume. */
+export function captainResumeWakeText(taskIds: readonly string[]): string {
+  return `The captain session resumed. Continue your assigned work now (${taskIds.join(', ')}). Call agent_teams_status, then finish or report a blocker. Do not wait for another assignment.`
+}

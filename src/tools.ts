@@ -44,6 +44,7 @@ import {
   resolveMemberLlmSelection,
   retireMember,
   spawnMember,
+  turnActivityOf,
   type MemberRuntimeConfig,
   type TeamDeliveryMode,
 } from './members.ts'
@@ -53,7 +54,14 @@ import {
   type IssueKind,
   type IssueSeverity,
 } from './report-issue.ts'
-import { lastMatchingStallNotice, lastTurnEndKind, shouldNotifyMemberStall, stallCaptainMessage } from './stall.ts'
+import {
+  captainResumeWakeText,
+  lastMatchingStallNotice,
+  lastTurnEndKind,
+  membersToWakeOnCaptainResume,
+  shouldNotifyMemberStall,
+  stallCaptainMessage,
+} from './stall.ts'
 import type { TeamMember, TeamState, TeamTask } from './types.ts'
 
 /** Resolved plugin config consumed by the tools. */
@@ -268,6 +276,39 @@ function installMemberStallWatcher(ctx: Context, config: ToolsConfig): void {
     if (status !== 'idle') return
     void notifyCaptainOfMemberStall(ctx, config, agent)
   })
+  ctx.on('agent/session-start', ({ agent, source }) => {
+    if (source !== 'resume') return
+    void wakeParkedMembersOnCaptainResume(ctx, config, agent)
+  })
+}
+
+/**
+ * Queue a continue wake to every member that still owns claimed work when
+ * the captain session itself resumes. Failures stay in the plugin log.
+ */
+async function wakeParkedMembersOnCaptainResume(ctx: Context, config: ToolsConfig, agent: Agent): Promise<void> {
+  try {
+    const workspace = workspaceOf(agent, config.stateDir)
+    const stateRoot = stateRootOf(workspace, config)
+    const team = await findTeamByCaptain(stateRoot, agent.id)
+    if (team === undefined) return
+    const names = membersToWakeOnCaptainResume(team.members.map((member) => ({
+      name: member.name,
+      id: member.id,
+      status: member.status,
+      activity: member.id === '' ? 'inactive' : turnActivityOf(ctx, member.id),
+      openTaskIds: assignedOpenTasks(team, member.name).map((task) => task.id),
+    })))
+    for (const name of names) {
+      const member = requireMember(team, name)
+      if (member.id === '') continue
+      const openTaskIds = assignedOpenTasks(team, member.name).map((task) => task.id)
+      const text = memberWakeText(stateRoot, team, member.name, captainResumeWakeText(openTaskIds))
+      await deliverToMember(ctx, agent, member.id, text, new AbortController().signal, 'queue')
+    }
+  } catch (error: unknown) {
+    ctx.logger.warn(`agent-teams: captain-resume wake failed: ${String(error)}`)
+  }
 }
 
 /**

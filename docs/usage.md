@@ -81,7 +81,7 @@
 
 ## 已知限制
 
-- 成员在收到消息后才行动，没有常驻轮询。在线投递默认排队到收件人下一轮；`mode=barge` 才打断当前轮次。被 interrupt 后若仍占着 claimed/in_progress 任务且 inbox 为空，会给队长发一条 stall 通知，任务不会被自动失败或取消认领。队长离线时消息留在邮箱、待下次在线时投递。
+- 成员在收到消息后才行动，没有常驻轮询。在线投递默认排队到收件人下一轮；`mode=barge` 才打断当前轮次。被 interrupt 后若仍占着 claimed/in_progress 任务且 inbox 为空，会给队长发一条 stall 通知，任务不会被自动失败或取消认领。队长会话 resume 时会给这些停住的成员排队一条继续干活的消息。队长离线时消息留在邮箱、待下次在线时投递。
 - 一个队长同时只能带一个团队（与 Claude Code AgentTeams 一致）。
 - 成员 persona 替换部署默认 persona。写者默认拥有完整工具集；只读角色在 spawn 时被拒绝 `write` / `edit` / `bash`。
 - 可选成员 worktree 依赖本机打过 cwd 缝的 runtime；缝没打上时 spawn 会 fail loud 并打断该成员，不会静默写回队长树。deployment 的 `pnpm install` 会冲掉这份缝。

@@ -2,9 +2,10 @@
 
 ## Goal
 
-Close open fork issues #13, #12, #11, #7, #6, and #5 with one coherent delivery
-contract. Captains can spawn, wake, and recover members without aborting live
-turns, losing claimed work, or watching members wander the umbrella workspace.
+Close open fork issues #14, #13, #12, #11, #7, #6, and #5 with one coherent
+delivery contract. Captains can spawn, wake, and recover members without
+aborting live turns, losing claimed work, or watching members wander the
+umbrella workspace.
 
 ## Scenario
 
@@ -29,6 +30,8 @@ a stalled member without polling.
   in_progress tasks. Status for a member viewer leads with those tasks.
   `claimed` counts as current work in the activity snapshot.
 - The first spawned task is marked `in_progress` once the child exists.
+- Captain `agent/session-start` with `source=resume` queues a continue wake
+  to every member that still owns claimed or in_progress work.
 
 ## Non-goals
 
@@ -61,9 +64,11 @@ Offline `node scripts/verify.mjs` after `pnpm build` proves:
    does not.
 6. Spawn prompt / assigned-work helper lists claimed tasks; snapshot
    `currentTask` uses claimed when nothing is `in_progress`.
+7. Captain resume selects claimed idle members and skips empty or removed
+   boards.
 
-GitHub issues #13, #12, #11, #7, #6, and #5 are closed with the implementing
-commit.
+GitHub issues #14, #13, #12, #11, #7, #6, and #5 are closed with the
+implementing commit.
 
 ## Resolved decisions
 

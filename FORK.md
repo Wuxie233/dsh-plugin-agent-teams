@@ -47,7 +47,8 @@ README/README_ZH/docs still apply unless overridden here.
   captain-pointer.
 - **Stall wake**: an interrupted member that goes idle with open
   claimed/in_progress tasks and an empty inbox queues a captain notice.
-  Tasks stay claimed.
+  Tasks stay claimed. Captain session resume queues a continue wake to
+  those parked members.
 - **Teardown drops queued member work**: `agent_teams_delete` calls
   `retireMember` (`cancel` without `keepInbox`) so stale follow-ups
   cannot keep waking the captain after the team is archived.

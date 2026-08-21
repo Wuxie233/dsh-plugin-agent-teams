@@ -12,7 +12,8 @@
 
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   CAPTAIN_KEY,
   appendMailbox,
@@ -48,7 +49,7 @@ import {
   retireMember,
   spawnMember,
 } from '../lib/members.js'
-import { lastMatchingStallNotice, lastTurnEndKind, shouldNotifyMemberStall, stallCaptainMessage } from '../lib/stall.js'
+import { captainResumeWakeText, lastMatchingStallNotice, lastTurnEndKind, membersToWakeOnCaptainResume, shouldNotifyMemberStall, stallCaptainMessage } from '../lib/stall.js'
 import { assembleTeamSnapshot } from '../lib/snapshot.js'
 import {
   FEEDBACK_LABEL,
@@ -717,6 +718,17 @@ check(
 )
 const stallText = stallCaptainMessage('backend', ['t1'])
 check(
+  'captain resume wakes claimed idle members and skips empty boards',
+  membersToWakeOnCaptainResume([
+    { name: 'git-chip', id: 'sess-a', status: 'idle', activity: 'inactive', openTaskIds: ['t1'] },
+    { name: 'busy', id: 'sess-busy', status: 'idle', activity: 'running', openTaskIds: ['t4'] },
+    { name: 'done', id: 'sess-b', status: 'idle', activity: 'inactive', openTaskIds: [] },
+    { name: 'removed', id: 'sess-c', status: 'removed', activity: 'inactive', openTaskIds: ['t9'] },
+    { name: 'unspawned', id: '', status: 'idle', activity: 'inactive', openTaskIds: ['t2'] },
+  ]).join(',') === 'git-chip'
+    && captainResumeWakeText(['t1']).includes('Continue your assigned work now (t1)'),
+)
+check(
   'duplicate stall for the same open tasks is suppressed',
   shouldNotifyMemberStall({
     memberStatus: 'idle',
@@ -1289,6 +1301,14 @@ try {
   check('unpatched runtime seam fails loud and interrupts the member', seamMissLoud)
 } finally {
   rmSync(wtRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+}
+
+console.log('source: conversation cards do not poll the snapshot route')
+{
+  const root = dirname(fileURLToPath(import.meta.url))
+  const card = await readFile(join(root, '../src/client/AgentTeamsCard.tsx'), 'utf8')
+  check('AgentTeamsCard does not fetch /plugins/dsh-agent-teams/state', !card.includes('/plugins/dsh-agent-teams/state'))
+  check('AgentTeamsCard does not start a setInterval poll', !card.includes('setInterval'))
 }
 
 if (failures > 0) {
