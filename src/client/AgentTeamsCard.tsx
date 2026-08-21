@@ -6,16 +6,16 @@
  *
  * The floater and this card share the `agent-teams:open-panel` window event
  * so the card can summon the panel even after it was closed (or when an old
- * session is re-opened for review).
+ * session is re-opened for review). Live enrichment comes from the panel's
+ * shared snapshot; a missing snapshot keeps the folded roster.
  * @module dsh-agent-teams/client/card
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { ActivityTeam } from './ActivityPanel.tsx'
 import type { AgentTeamsCardData } from './agent-teams-card-definition.ts'
-import { fetchJsonWithTimeout } from './activity-model.ts'
+import { findActivityTeam, getActivitySnapshot, subscribeActivitySnapshot } from './activity-store.ts'
 import { LEAD_ART, memberArtUrl } from './artwork.ts'
 import css from './AgentTeamsCard.module.css'
 
@@ -52,34 +52,8 @@ function openActivityPanel(data: AgentTeamsCardData): void {
 export function AgentTeamsCard({ node, openSession, currentSessionId }: AgentTeamsCardProps) {
   const data = node.data as AgentTeamsCardData
   const owner = data.captainSessionId || currentSessionId() || ''
-  const [snapshot, setSnapshot] = useState<ActivityTeam | undefined>()
-  useEffect(() => {
-    let cancelled = false
-    const tick = async (): Promise<void> => {
-      for (const url of ['/plugins/dsh-agent-teams/state', '/plugins/dsh-agent-teams/state?archived=1']) {
-        try {
-          const { ok, json } = await fetchJsonWithTimeout(url)
-          if (!ok || typeof json !== 'object' || json === null || !('teams' in json)) continue
-          const teams = json.teams
-          const found = Array.isArray(teams)
-            ? (teams as readonly ActivityTeam[]).find((team) => team.teamId === data.teamId && (owner === '' || team.captainSessionId === owner))
-            : undefined
-          if (found !== undefined) {
-            if (!cancelled) setSnapshot(found)
-            return
-          }
-        } catch {
-          // Host restarting or timed out; keep the folded roster.
-        }
-      }
-    }
-    void tick()
-    const timer = setInterval(() => { void tick() }, 1500)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-  }, [data.teamId, owner])
+  useSyncExternalStore(subscribeActivitySnapshot, getActivitySnapshot)
+  const snapshot = findActivityTeam(data.teamId, owner)
   const resolved = useMemo<AgentTeamsCardData>(() => ({
     ...data,
     captainSessionId: snapshot?.captainSessionId ?? owner,
