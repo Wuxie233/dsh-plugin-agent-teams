@@ -708,11 +708,11 @@ const pinnedPersona = memberPersona(
   { id: 'sess-catalog', name: 'catalog-engineer', role: 'engineer', joinedAt: 0, status: 'idle' },
   '.agent-teams',
   [],
-  '/root/CODE/wenjie-chat',
+  '/tmp/example-project',
 )
 check(
   'persona names the workspace root and forbids sibling search',
-  pinnedPersona.includes('Workspace root: /root/CODE/wenjie-chat')
+  pinnedPersona.includes('Workspace root: /tmp/example-project')
     && pinnedPersona.includes('Do not search, read, or write sibling repositories'),
 )
 check(

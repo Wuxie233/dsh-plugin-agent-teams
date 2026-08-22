@@ -57,7 +57,7 @@
 
 `agent_teams_add_member` 必须带上第一份任务：`task_subject`，以及一份 spawn brief。文档字段是 `prompt`；如果模型发不出这个字段名，`brief` / `instructions` / `task_description` / `task_subject` 都可以顶上。runtime 要求 spawn 时提交一条 user prompt，所以这份 brief 就是成员的第一轮，不再单独欢迎。也可以传已有的 `task_id` 来认领。默认不需要模型参数：它会快照队长当前请求真正生效的 LLM provider、model 与思考强度。用户明确要求某个角色使用其他模型时，可以同时传入可选的 `provider` + `model`；只覆盖 `model` 时沿用队长当前 LLM provider。插件不会为每个成员发起二次选择或弹窗，也不暴露逐成员思考强度参数。
 
-可选参数 `cwd` 是成员工作目录的绝对路径。队长会话停在伞目录（例如 `/root/CODE`）时，把目标仓库绝对路径传进来，成员就不会去翻兄弟仓库。`cwd` 不等于队长工作区时会写 `captain-pointer.json`。可选参数 `worktree` 是队长已经建好的 git worktree 绝对路径，要求目录里有 `.git`，只读角色拒绝。两者同时传时必须是同一条路径。建树、合并、删除 worktree 都是队长的 git 操作，插件不管生命周期。默认不要传：写者共享队长工作区、靠独占路径并行。
+可选参数 `cwd` 是成员工作目录的绝对路径。队长会话停在伞目录时，把目标仓库绝对路径传进来，成员就不会去翻兄弟仓库。`cwd` 不等于队长工作区时会写 `captain-pointer.json`。可选参数 `worktree` 是队长已经建好的 git worktree 绝对路径，要求目录里有 `.git`，只读角色拒绝。两者同时传时必须是同一条路径。建树、合并、删除 worktree 都是队长的 git 操作，插件不管生命周期。默认不要传：写者共享队长工作区、靠独占路径并行。
 
 ## 配置
 
