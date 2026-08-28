@@ -19,6 +19,15 @@
   and registers the card with `ctx.uiConversation.events.register`. Waiting
   on `conversationEvents` leaves the whole GUI pending after the 2026-08
   Conversation service rename.
+- `@deepseek-ai/dsh-client-runtime` is gone (0.1.2-alpha.1). Client apply
+  types `Context` from `@deepseek-ai/cordis`; `SessionId` from
+  `@deepseek-ai/dsh-session/types`; conversation types from
+  `dsh-client-ui-conversation/client`; `ChatNodeDataMap` /
+  `ChatConversationViewNode` from `dsh-client-ui-chat/client`;
+  `ObservableSnapshot` from `dsh-client-store`; `SessionListState` from
+  `dsh-api-session-controller/client`. tsdown externals are only the
+  PLATFORM_MODULES seed table. Requiring the deleted runtime specifier
+  white-screens the GUI.
 - The conversation card folds create/add_member/remove_member
   `tool/result.meta` onto one team id. Do not hardcode `members: []`.
   The activity panel is the only `/plugins/dsh-agent-teams/state` poller;

@@ -3,6 +3,15 @@
 Upstream: NanmiCoder/dsh-agent-teams (remote `upstream`). The upstream
 README/README_ZH/docs still apply unless overridden here.
 
+## DSH 0.1.2-alpha.1 (v0.2.1)
+
+- Drop `@deepseek-ai/dsh-client-runtime`. Browser apply types `Context`
+  from cordis. Conversation card types come from
+  `dsh-client-ui-conversation` / `dsh-client-ui-chat`. Activity panel
+  reads `SessionListState` from session-controller and
+  `ObservableSnapshot` from `dsh-client-store`.
+- tsdown externals are the current PLATFORM_MODULES seed table only.
+
 ## Fork differences (v0.2.0)
 
 - Package renamed to `@wuxie233/dsh-agent-teams`.

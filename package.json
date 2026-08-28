@@ -1,6 +1,6 @@
 {
   "name": "@wuxie233/dsh-agent-teams",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "AgentTeams for DSH (Wuxie233 fork): per-member model routing, read-only role deny lists",
   "type": "module",
   "main": "lib/index.js",
@@ -63,7 +63,6 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-conversation"
       ],
       "platform": "web"
@@ -72,7 +71,6 @@
   "dshClient": {
     "inject": [
       "@deepseek-ai/dsh-client-locale",
-      "@deepseek-ai/dsh-client-runtime",
       "@deepseek-ai/dsh-client-ui-conversation"
     ],
     "platform": "web"
@@ -88,9 +86,8 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1-rc.1",
     "@deepseek-ai/dsh-agent": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-locale": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
@@ -104,9 +101,11 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-agent": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-locale": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-conversation": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-api-session-controller": "0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-locale": "0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-store": "0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-chat": "0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-slots": "0.1.0-rc.6",
     "@deepseek-ai/dsh-llm": "0.1.0-rc.6",

@@ -13,6 +13,7 @@
 
 import { useMemo, useSyncExternalStore } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { AgentTeamsCardData } from './agent-teams-card-definition.ts'
 import { findActivityTeam, getActivitySnapshot, subscribeActivitySnapshot } from './activity-store.ts'

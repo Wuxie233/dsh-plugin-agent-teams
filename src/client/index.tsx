@@ -1,10 +1,12 @@
 /** Browser plugin for the AgentTeams activity floater and conversation card. */
 
-import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context } from '@deepseek-ai/cordis'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { createRoot } from 'react-dom/client'
-// Module-loading import: the card registers into the conversation chat-node
-// slot, whose keyed renderer map lives in the ui-conversation contract.
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { ActivityPanel } from './ActivityPanel.tsx'
 import { AgentTeamsCard, type AgentTeamsCardInjected } from './AgentTeamsCard.tsx'
 import { agentTeamsCardDefinition } from './agent-teams-card-definition.ts'
@@ -18,7 +20,7 @@ export const inject = ['uiConversation', 'slots', 'sessions']
  * button re-activates the floater via a window event — the recovery path
  * for a closed floater or a re-opened session.
  */
-export function apply(ctx: ClientContext): void {
+export function apply(ctx: Context): void {
   const host = document.createElement('div')
   host.dataset.agentTeamsHost = ''
   document.body.appendChild(host)
@@ -32,10 +34,7 @@ export function apply(ctx: ClientContext): void {
     host.remove()
   }, 'agent-teams: activity panel')
 
-  const uiConversation = (ctx as ClientContext & {
-    uiConversation: { events: { register: (definition: typeof agentTeamsCardDefinition) => unknown } }
-  }).uiConversation
-  uiConversation.events.register(agentTeamsCardDefinition)
+  ctx.uiConversation.events.register(agentTeamsCardDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',
     key: 'agent-teams',

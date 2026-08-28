@@ -21,8 +21,9 @@ import {
   IconBranchOutline16, IconChevronRightOutline14, IconCloseOutline16,
   StateDot, type StateDotState,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { ObservableSnapshot, SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 import { activityPanelExpandedForSession, fetchJsonWithTimeout, relatedTaskIds, taskStages } from './activity-model.ts'
 import { resetActivitySnapshot, setActivityArchivedTeams, setActivityLiveTeams } from './activity-store.ts'
 import { ACTION_ART, LEAD_ART, memberArtUrl } from './artwork.ts'
