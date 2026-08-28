@@ -10,7 +10,7 @@ import { AgentTeamsCard, type AgentTeamsCardInjected } from './AgentTeamsCard.ts
 import { agentTeamsCardDefinition } from './agent-teams-card-definition.ts'
 
 /** Required services: conversation nodes, slots, and sessions navigation. */
-export const inject = ['conversationEvents', 'slots', 'sessions']
+export const inject = ['uiConversation', 'slots', 'sessions']
 
 /**
  * Mount the floater through a body portal (the web shell has no top-right
@@ -32,7 +32,10 @@ export function apply(ctx: ClientContext): void {
     host.remove()
   }, 'agent-teams: activity panel')
 
-  ctx.conversationEvents.register(agentTeamsCardDefinition)
+  const uiConversation = (ctx as ClientContext & {
+    uiConversation: { events: { register: (definition: typeof agentTeamsCardDefinition) => unknown } }
+  }).uiConversation
+  uiConversation.events.register(agentTeamsCardDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',
     key: 'agent-teams',

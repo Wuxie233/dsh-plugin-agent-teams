@@ -15,6 +15,10 @@
   Don't make it required.
 - Deploy by copy (`install.sh`), never symlink (Node ESM resolution).
 - Host-half changes need a dsh web restart; client-half only a page refresh.
+- Browser half injects `uiConversation` (not the retired `conversationEvents`)
+  and registers the card with `ctx.uiConversation.events.register`. Waiting
+  on `conversationEvents` leaves the whole GUI pending after the 2026-08
+  Conversation service rename.
 - The conversation card folds create/add_member/remove_member
   `tool/result.meta` onto one team id. Do not hardcode `members: []`.
   The activity panel is the only `/plugins/dsh-agent-teams/state` poller;
