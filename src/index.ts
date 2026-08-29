@@ -1,18 +1,22 @@
 /**
  * AgentTeams for DeepSeek Harness.
  *
- * A host-plane plugin that registers the `agent_teams_*` tools and one usage
- * section into the global system prompt. After installation any session can
- * run multi-agent teamwork through natural language (e.g. "use AgentTeams to research X"):
- * the model creates a team (it becomes the captain), spawns members as
- * durable continuable subagents, breaks the goal into tasks with
- * dependencies, wakes members with messages, relays reports, and collects
- * results.
+ * A host-plane plugin with two independently mountable surfaces:
+ * - `registerTools` (default true): `agent_teams_*` tools plus the systemPrompt
+ *   usage section. A Team agent preset mounts this so only that preset's
+ *   sessions see the tools.
+ * - `registerWeb` (default true): `/plugins/dsh-agent-teams/state` and artwork
+ *   routes for the Web activity panel. A host-plane mount keeps the panel
+ *   without exposing tools to Native sessions by setting `registerTools: false`.
  *
- * Installation (bundle): `dsh plugin --profile <name> add @nanmicoder/dsh-agent-teams`
- * (or a local path). The bundle patch mounts this plugin row into the host
- * composition; the tools register into the shared `tools` registry and the
- * usage section into the global system prompt, so the plugin needs no realm.
+ * Both flags default true so a single-row install still behaves as before.
+ * Dual-mount (host panel + Team-preset tools) must flip the unused surface
+ * off, or two instances would double-register HTTP routes / tools.
+ *
+ * `inject` stays unconditional (`tools`, `llm`, `subagents`, `systemPrompt`,
+ * `agents`) so existing host mounts keep activating against the same service
+ * set even when `registerTools` is false. Web server / workspace registry
+ * stay lazy via `ctx.get` so a webless or tools-only mount never blocks boot.
  *
  * @module dsh-agent-teams
  */
@@ -74,6 +78,18 @@ export interface Config {
   readOnlyRoles?: string[]
   /** Prompt-section order for the usage policy (default `117`, after delegation policy). */
   promptSectionOrder?: number
+  /**
+   * When true, register `agent_teams_*` tools and the systemPrompt usage
+   * section (default true). Host-plane mounts that only want the Web activity
+   * panel should set this to false so Native sessions do not see the tools.
+   */
+  registerTools?: boolean
+  /**
+   * When true, register `/plugins/dsh-agent-teams/state` and artwork routes
+   * (default true). A Team agent preset that already shares the host Web panel
+   * should set this to false to avoid double-registering HTTP routes.
+   */
+  registerWeb?: boolean
 }
 
 export const Config: z<Config> = z.object({
@@ -84,6 +100,8 @@ export const Config: z<Config> = z.object({
   maxMembers: z.natural().min(1),
   readOnlyRoles: z.array(z.string()).default(['scout', 'reviewer', 'planner', 'diagnostician']),
   promptSectionOrder: z.natural().default(117),
+  registerTools: z.boolean().default(true),
+  registerWeb: z.boolean().default(true),
 })
 
 /** The model-facing usage policy: when and how to drive AgentTeams. */
@@ -108,6 +126,8 @@ export function apply(ctx: Context, config: Config): void {
     maxMembers: config.maxMembers,
     readOnlyRoles: config.readOnlyRoles ?? ['scout', 'reviewer', 'planner', 'diagnostician'],
   }
+  const registerTools = config.registerTools ?? true
+  const registerWeb = config.registerWeb ?? true
 
   // Provider registration is a sibling plugin's effect (`subagent-spawn` /
   // `subagent-fork` rows), which can land after this mount under the Loader's
@@ -115,26 +135,30 @@ export function apply(ctx: Context, config: Config): void {
   // member spawn (`spawnMember`), the earliest point the provider list is
   // settled, rather than here.
 
-  const toolNames = [
-    'agent_teams_create',
-    'agent_teams_add_member',
-    'agent_teams_remove_member',
-    'agent_teams_create_task',
-    'agent_teams_claim_task',
-    'agent_teams_update_task',
-    'agent_teams_send_message',
-    'agent_teams_status',
-    'agent_teams_delete',
-    // agent_teams_report_issue stays off this shared list: members share
-    // the usage section and must not be invited to hunt plugin defects.
-  ].join(', ')
-  ctx.systemPrompt.section({
-    name: 'agent-teams:usage',
-    order: config.promptSectionOrder ?? 117,
-    text: usageSectionText(toolNames),
-  })
+  if (registerTools) {
+    const toolNames = [
+      'agent_teams_create',
+      'agent_teams_add_member',
+      'agent_teams_remove_member',
+      'agent_teams_create_task',
+      'agent_teams_claim_task',
+      'agent_teams_update_task',
+      'agent_teams_send_message',
+      'agent_teams_status',
+      'agent_teams_delete',
+      // agent_teams_report_issue stays off this shared list: members share
+      // the usage section and must not be invited to hunt plugin defects.
+    ].join(', ')
+    ctx.systemPrompt.section({
+      name: 'agent-teams:usage',
+      order: config.promptSectionOrder ?? 117,
+      text: usageSectionText(toolNames),
+    })
 
-  registerAgentTeamsTools(ctx, resolved)
+    registerAgentTeamsTools(ctx, resolved)
+  }
+
+  if (!registerWeb) return
 
   // The activity panel data/artwork routes need the Web server and the
   // workspace registry, which headless profiles do not mount; under

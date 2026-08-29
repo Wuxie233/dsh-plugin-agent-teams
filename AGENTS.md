@@ -9,6 +9,11 @@
 - Package name appears in three places that must stay in sync:
   `package.json` name, `cordis.patch.yml` mount row, client registration.
   It is `@wuxie233/dsh-agent-teams`.
+- Dual-mode host vs Team preset: host mounts `registerTools: false`
+  (Web panel only); Team preset mounts `registerWeb: false` (tools +
+  usage section). Defaults stay true so a single-row install still works.
+  Do not leave both true on two mounts — HTTP routes / tools would
+  double-register.
 - `scripts/verify.mjs` calls `spawnMember` with the upstream signature
   (positional args, no runtime config for roles) — that is why
   `MemberRuntimeConfig.readOnlyRoles` is optional with `?? []` fallbacks.
