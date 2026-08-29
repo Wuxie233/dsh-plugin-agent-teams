@@ -36,7 +36,7 @@ import {
 } from '../lib/client/agent-teams-card-definition.js'
 import { parseAgentTeamsToolMeta } from '../lib/card-meta.js'
 import { ACTIVITY_LIST_TIMEOUT_MS, withTimeout } from '../lib/timeout.js'
-import { bargeCaptainReport, deliverCaptainReport, parseDeliveryMode, resolveMemberSpawnBrief } from '../lib/tools.js'
+import { assertMemberCap, bargeCaptainReport, deliverCaptainReport, liveMemberCount, parseDeliveryMode, resolveMemberSpawnBrief } from '../lib/tools.js'
 import {
   assignedWorkBlock,
   deliverToMember,
@@ -144,6 +144,41 @@ check('claimed -> completed allowed', transitionError('claimed', 'completed') ==
 check('in_progress -> completed allowed', transitionError('in_progress', 'completed') === undefined)
 check('completed -> in_progress denied', transitionError('completed', 'in_progress') !== undefined)
 check('same status is a no-op', transitionError('failed', 'failed') === undefined)
+
+{
+  const eightLive = {
+    name: 'uncapped',
+    members: Array.from({ length: 8 }, () => ({ status: 'idle' })),
+  }
+  const nineLive = {
+    name: 'uncapped',
+    members: [...eightLive.members, { status: 'working' }],
+  }
+  const twoLiveOneRemoved = {
+    name: 'capped',
+    members: [
+      { status: 'idle' },
+      { status: 'working' },
+      { status: 'removed' },
+    ],
+  }
+  check('liveMemberCount ignores removed members', liveMemberCount(twoLiveOneRemoved) === 2)
+  check('unconfigured maxMembers allows a 9th live member', (() => {
+    assertMemberCap(eightLive, undefined)
+    assertMemberCap(nineLive, undefined)
+    return liveMemberCount(nineLive) === 9
+  })())
+  let overflowMessage = ''
+  try {
+    assertMemberCap(twoLiveOneRemoved, 2)
+  } catch (error) {
+    overflowMessage = String(error)
+  }
+  check(
+    'configured maxMembers: 2 rejects the 3rd live member with liveCount/cap',
+    overflowMessage.includes('(2/2)') && overflowMessage.includes('member cap'),
+  )
+}
 
 console.log('3/8 dependency gating')
 const tasks = [
@@ -913,7 +948,7 @@ function descriptorEvent(label, agentProvider = 'descriptor-provider', agentMode
   return {
     type: 'subagent/descriptor',
     data: {
-      version: 2,
+      version: 3,
       mode: 'continuable',
       provider: 'spawn',
       label,

@@ -54,7 +54,10 @@ README/README_ZH/docs still apply unless overridden here.
 - **Optional member `cwd`**: pin a child to one repo when the captain
   sits on an umbrella workspace. Differs from `worktree` (no `.git`
   requirement). A cwd that is not the captain workspace writes a
-  captain-pointer.
+  captain-pointer. cwd/worktree still require the runtime child-cwd
+  transport; a miss still fail-loud.
+- **No default member cap**: omit `maxMembers` for unlimited live
+  members. An explicit number still rejects overflow with `liveCount/cap`.
 - **Stall notice**: an interrupted member that goes idle with open
   claimed/in_progress tasks and an empty inbox queues a captain notice.
   Tasks stay claimed. Captain session resume does not auto-wake members.

@@ -68,7 +68,7 @@ export interface Config {
   memberModel?: string
   /** Member delegation depth cap (default `1`; `0` forbids delegation entirely). */
   memberMaxDepth?: number
-  /** Team size cap in members (default `8`). */
+  /** Optional live-member cap; omit for no cap. */
   maxMembers?: number
   /** Role tokens whose members deny write/edit/bash on spawn (matched case-insensitively by substring). */
   readOnlyRoles?: string[]
@@ -81,7 +81,7 @@ export const Config: z<Config> = z.object({
   memberProvider: z.string().default('spawn'),
   memberModel: z.string(),
   memberMaxDepth: z.natural().default(1),
-  maxMembers: z.natural().min(1).default(8),
+  maxMembers: z.natural().min(1),
   readOnlyRoles: z.array(z.string()).default(['scout', 'reviewer', 'planner', 'diagnostician']),
   promptSectionOrder: z.natural().default(117),
 })
@@ -105,7 +105,7 @@ export function apply(ctx: Context, config: Config): void {
     memberProvider: config.memberProvider ?? 'spawn',
     memberModel: config.memberModel,
     memberMaxDepth: config.memberMaxDepth ?? 1,
-    maxMembers: config.maxMembers ?? 8,
+    maxMembers: config.maxMembers,
     readOnlyRoles: config.readOnlyRoles ?? ['scout', 'reviewer', 'planner', 'diagnostician'],
   }
 

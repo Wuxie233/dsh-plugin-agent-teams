@@ -70,10 +70,10 @@
     memberProvider: spawn         # 子代理运行后端（spawn / fork），不是 LLM provider
     memberModel: deepseek-v4      # 可选：成员模型覆盖
     memberMaxDepth: 1             # 成员再委派深度上限（0 = 禁止）
-    maxMembers: 8                 # 团队人数上限
+    # maxMembers: 8               # 可选在册人数上限；省略表示不封顶
 ```
 
-最终优先级为：成员显式 `provider` + `model` / `model` → `memberModel` → 队长当前路由。思考强度默认继承队长当前值，并在目标 provider/model 上创建前校验；不兼容时成员创建会明确失败。最终生效的 provider/model/思考强度会写入 `team.json`，供状态查询和成员冷恢复使用。
+省略 `maxMembers` 表示不限制在册人数；显式配置数字后仍会拒绝超员。最终优先级为：成员显式 `provider` + `model` / `model` → `memberModel` → 队长当前路由。思考强度默认继承队长当前值，并在目标 provider/model 上创建前校验；不兼容时成员创建会明确失败。最终生效的 provider/model/思考强度会写入 `team.json`，供状态查询和成员冷恢复使用。
 
 ## 使用协议
 
@@ -84,7 +84,8 @@
 - 成员在收到消息后才行动，没有常驻轮询。队长派完第一份 brief 后等待成员报告或 stall 通知，不因工作区还没文件就催「请继续」。在线投递默认插话打断当前轮次；`mode=queue` 才排到下一轮。被 interrupt 后若仍占着 claimed/in_progress 任务且 inbox 为空，会给队长发一条 stall 通知（插件观测，不是成员回报），任务不会被自动失败或取消认领。队长会话 resume 不会自动喊成员继续。队长离线时消息留在邮箱、待下次在线时投递。
 - 一个队长同时只能带一个团队（与 Claude Code AgentTeams 一致）。
 - 成员 persona 替换部署默认 persona。写者默认拥有完整工具集；只读角色在 spawn 时被拒绝 `write` / `edit` / `bash`。
-- 可选成员 worktree 依赖本机打过 cwd 缝的 runtime；缝没打上时 spawn 会 fail loud 并打断该成员，不会静默写回队长树。deployment 的 `pnpm install` 会冲掉这份缝。
+- 可选成员 `cwd` / worktree 依赖 runtime 的 child-cwd 传输；缝没打上时 spawn 会 fail loud 并打断该成员，不会静默写回队长树。deployment 的 `pnpm install` 会冲掉这份缝。
+- 默认不限制在册人数。只有显式配置 `maxMembers` 才会在超员时 fail loud（错误信息含 `liveCount/cap`）。
 - 团队状态为文件级持久化，多进程同时操作同一团队不保证一致（同一 dsh 进程内已用锁串行化）。
 - 对话流卡片从 create / add_member / remove_member 的 `tool/result.meta` 折叠花名册；活动面板仍读磁盘真相（1s 轮询，快照路由有超时）。成员「工作中」只看 live Agent 是否正在跑一轮；会话还在内存、对话已停止时显示空闲，不沿用 `listChildren().activity`。快照失败时卡片保留折叠花名册，不把它显示成 0 人。
 - 右上角浮层通过 body portal 挂载；宽屏展开时主对话列平滑向左礼让空间，窄屏退回 overlay 模式，左侧导航保持不动。

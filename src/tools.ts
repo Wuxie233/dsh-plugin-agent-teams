@@ -61,6 +61,26 @@ import {
 } from './stall.ts'
 import type { TeamMember, TeamState, TeamTask } from './types.ts'
 
+/** Count live (non-removed) members. */
+export function liveMemberCount(team: { members: readonly { status: string }[] }): number {
+  return team.members.filter((candidate) => candidate.status !== 'removed').length
+}
+
+/**
+ * Fail when a configured cap would be exceeded by adding one more live member.
+ * Unconfigured `maxMembers` is no cap.
+ */
+export function assertMemberCap(
+  team: { name: string; members: readonly { status: string }[] },
+  maxMembers: number | undefined,
+): void {
+  if (typeof maxMembers !== 'number') return
+  const liveCount = liveMemberCount(team)
+  if (liveCount >= maxMembers) {
+    throw new Error(`team "${team.name}" is at its member cap (${liveCount}/${maxMembers})`)
+  }
+}
+
 /** Resolved plugin config consumed by the tools. */
 export interface ToolsConfig {
   /** State directory name under the captain's workspace. */
@@ -71,8 +91,8 @@ export interface ToolsConfig {
   memberModel?: string
   /** Member delegation depth cap. */
   memberMaxDepth?: number
-  /** Team size cap (members). */
-  maxMembers: number
+  /** Optional live-member cap; omit for no cap. */
+  maxMembers?: number
   /** Role tokens whose members deny write/edit/bash on spawn. */
   readOnlyRoles: readonly string[]
 }
@@ -456,14 +476,17 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
           model: { type: 'string', required: true },
           reasoning_effort: { type: 'string' },
           worktree: { type: 'string' },
+          cwd: { type: 'string' },
           status: { type: 'string', required: true },
           task_id: { type: 'string', required: true },
           task_status: { type: 'string', required: true },
+          member_count: { type: 'number', required: true },
+          member_cap: { type: 'number' },
         },
       },
       render: (args, value) => [{
         type: 'text',
-        text: `Member "${value.member_name}" added (subagent id ${value.member_id}, ${value.provider}/${value.model}${value.reasoning_effort === undefined ? '' : `, reasoning ${value.reasoning_effort}`}${value.worktree === undefined ? '' : `, worktree ${value.worktree}`}, status ${value.status}). First task ${value.task_id} is ${value.task_status}.`,
+        text: `Member "${value.member_name}" added (subagent id ${value.member_id}, ${value.provider}/${value.model}${value.reasoning_effort === undefined ? '' : `, reasoning ${value.reasoning_effort}`}${value.worktree === undefined ? '' : `, worktree ${value.worktree}`}${value.cwd === undefined ? '' : `, cwd ${value.cwd}`}, status ${value.status}, member_count ${value.member_count}). First task ${value.task_id} is ${value.task_status}.`,
       }],
       presentationMeta(_args, value): JsonValue {
         return {
@@ -493,9 +516,7 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
         if (fresh.members.some((candidate) => sanitizeKey(candidate.name) === memberKey)) {
           throw new Error(`member name "${args.name}" has already been used in team "${fresh.name}"`)
         }
-        if (fresh.members.filter((candidate) => candidate.status !== 'removed').length >= config.maxMembers) {
-          throw new Error(`team "${fresh.name}" is at its member cap (${config.maxMembers})`)
-        }
+        assertMemberCap(fresh, config.maxMembers)
         const selection = await resolveMemberLlmSelection(ctx, captain, {
           provider: args.provider,
           model: args.model,
@@ -612,9 +633,12 @@ export function registerAgentTeamsTools(ctx: Context, config: ToolsConfig): void
             ? {}
             : { reasoning_effort: selection.reasoningEffort },
           ...member.worktree === undefined ? {} : { worktree: member.worktree },
+          ...args.cwd === undefined ? {} : { cwd: args.cwd },
           status: member.status,
           task_id: firstTask.id,
           task_status: firstTask.status,
+          member_count: liveMemberCount(fresh),
+          ...typeof config.maxMembers === 'number' ? { member_cap: config.maxMembers } : {},
         }
       })
     },

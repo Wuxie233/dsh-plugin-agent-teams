@@ -90,10 +90,10 @@ dsh web
     memberProvider: spawn
     memberModel: deepseek-v4
     memberMaxDepth: 1
-    maxMembers: 8
+    # maxMembers: 8               # 可选在册人数上限；省略表示不封顶
 ```
 
-这里的 `memberProvider` 指子 Agent 的运行后端（`spawn` / `fork`），不是 LLM provider。跨 LLM provider 由 `agent_teams_add_member` 的可选 `provider` + `model` 参数表达；`memberModel` 只是所有成员的模型默认覆盖。
+这里的 `memberProvider` 指子 Agent 的运行后端（`spawn` / `fork`），不是 LLM provider。跨 LLM provider 由 `agent_teams_add_member` 的可选 `provider` + `model` 参数表达；`memberModel` 只是所有成员的模型默认覆盖。省略 `maxMembers` 表示不限制在册人数；显式配置数字后仍会拒绝超员。
 
 ## 使用边界
 

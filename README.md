@@ -90,10 +90,10 @@ Defaults work without extra setup. A trusted profile can override member behavio
     memberProvider: spawn
     memberModel: deepseek-v4
     memberMaxDepth: 1
-    maxMembers: 8
+    # maxMembers: 8               # optional live-member cap; omit for no cap
 ```
 
-`memberProvider` is the sub-agent runtime backend (`spawn` / `fork`), not an LLM provider. Cross-LLM-provider routing uses the optional `provider` + `model` fields of `agent_teams_add_member`; `memberModel` is only a model default for all members.
+`memberProvider` is the sub-agent runtime backend (`spawn` / `fork`), not an LLM provider. Cross-LLM-provider routing uses the optional `provider` + `model` fields of `agent_teams_add_member`; `memberModel` is only a model default for all members. Omitting `maxMembers` means no live-member cap; an explicit number still rejects overflow.
 
 ## Boundaries
 

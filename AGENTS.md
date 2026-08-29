@@ -44,7 +44,11 @@
   report or a stall notice, then barge a new instruction.
 - Optional `cwd` on add_member pins the child workspace. A cwd that is
   not the captain workspace writes `captain-pointer.json`. When both
-  `cwd` and `worktree` are set they must be the same path.
+  `cwd` and `worktree` are set they must be the same path. cwd/worktree
+  still require the runtime child-cwd transport; a miss still fail-loud
+  and interrupts the member (no warning-and-spawn on the captain tree).
+- Default live-member count is unlimited. An explicit `maxMembers` still
+  fail-loud with `liveCount/cap` in the error.
 - An interrupted member that goes idle with open claimed/in_progress
   tasks and an empty inbox queues a captain stall notice. Do not fail or
   unclaim the task. Do not auto-wake members on captain session resume.
