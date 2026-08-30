@@ -1378,6 +1378,18 @@ console.log('source: conversation cards do not poll the snapshot route')
   check('AgentTeamsCard does not start a setInterval poll', !card.includes('setInterval'))
 }
 
+console.log('source: duplicate web routes do not fail the plugin apply')
+{
+  const { isDuplicateRouteError } = await import('../lib/duplicate-route.js')
+  check('exact duplicate route error is recognized', isDuplicateRouteError(
+    new Error('webserver: duplicate exact route "/plugins/dsh-agent-teams/state"'),
+  ))
+  check('prefix duplicate route error is recognized', isDuplicateRouteError(
+    new Error('webserver: duplicate prefix route "/plugins/dsh-agent-teams/assets"'),
+  ))
+  check('unrelated errors are not swallowed', !isDuplicateRouteError(new Error('snapshot-unavailable')))
+}
+
 if (failures > 0) {
   console.error(`\n${failures} check(s) FAILED`)
   process.exit(1)

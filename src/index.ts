@@ -11,7 +11,8 @@
  *
  * Both flags default true so a single-row install still behaves as before.
  * Dual-mount (host panel + Team-preset tools) must flip the unused surface
- * off, or two instances would double-register HTTP routes / tools.
+ * off. A second Web mount now skips an already-owned route instead of
+ * throwing, so a stale or mis-flagged remount cannot kill session.create.
  *
  * `inject` stays unconditional (`tools`, `llm`, `subagents`, `systemPrompt`,
  * `agents`) so existing host mounts keep activating against the same service
@@ -35,6 +36,9 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectArchivedTeamsActivity, collectTeamsActivity } from './snapshot.ts'
 import { SNAPSHOT_ROUTE_TIMEOUT_MS, withTimeout } from './timeout.ts'
+import { isDuplicateRouteError } from './duplicate-route.ts'
+
+export { isDuplicateRouteError } from './duplicate-route.ts'
 
 /**
  * Structural slice of the web server service, compatible with both the
@@ -173,10 +177,27 @@ export function apply(ctx: Context, config: Config): void {
     if (webServer === undefined || workspaceRegistry === undefined) return
     webRegistered = true
 
+    const registerQuietly = (
+      route: Parameters<WebRouteHost['register']>[0],
+      label: string,
+    ): void => {
+      ctx.effect(() => {
+        try {
+          return webServer.register(route)
+        } catch (error) {
+          if (isDuplicateRouteError(error)) {
+            ctx.logger.warn(`agent-teams: ${route.path} already registered, skipping`)
+            return () => {}
+          }
+          throw error
+        }
+      }, label)
+    }
+
     // Activity panel data route: the browser floater polls this for team
     // snapshots (disk truth + live subagent activity). Mirrors the Claude
     // Code desktop watcher's server-side snapshot pattern.
-    ctx.effect(() => webServer.register({
+    registerQuietly({
     kind: 'exact',
     path: '/plugins/dsh-agent-teams/state',
     handler: async (req, res) => {
@@ -209,7 +230,7 @@ export function apply(ctx: Context, config: Config): void {
         res.end(JSON.stringify({ error: 'snapshot-unavailable' }))
       }
     },
-  }), 'agent-teams: activity route')
+  }, 'agent-teams: activity route')
 
   // Whale mascot artwork: serve the packaged role/action images to the
   // activity panel. An explicit allowlist guards the route (no path
@@ -222,7 +243,7 @@ export function apply(ctx: Context, config: Config): void {
     'action-reporting.png', 'action-celebrating.png', 'action-sleeping.png',
     'action-sending.png',
   ])
-    ctx.effect(() => webServer.register({
+    registerQuietly({
       kind: 'prefix',
       path: '/plugins/dsh-agent-teams/assets',
     handler: async (req, res) => {
@@ -253,7 +274,7 @@ export function apply(ctx: Context, config: Config): void {
         res.end()
       }
       },
-    }), 'agent-teams: artwork route')
+    }, 'agent-teams: artwork route')
   }
 
   registerWebSurface()

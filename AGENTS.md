@@ -12,8 +12,9 @@
 - Dual-mode host vs Team preset: host mounts `registerTools: false`
   (Web panel only); Team preset mounts `registerWeb: false` (tools +
   usage section). Defaults stay true so a single-row install still works.
-  Do not leave both true on two mounts — HTTP routes / tools would
-  double-register.
+  Do not leave both true on two mounts. A second Web mount now skips an
+  already-owned HTTP route instead of throwing (session.create used to die
+  with `duplicate exact route "/plugins/dsh-agent-teams/state"`).
 - `scripts/verify.mjs` calls `spawnMember` with the upstream signature
   (positional args, no runtime config for roles) — that is why
   `MemberRuntimeConfig.readOnlyRoles` is optional with `?? []` fallbacks.
