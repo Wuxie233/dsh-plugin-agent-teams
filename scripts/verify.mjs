@@ -932,7 +932,18 @@ check(
   '#20: spawn receives the resolved per-member provider and model',
   startSpec?.request?.agentOptions?.provider === 'other-provider'
     && startSpec?.request?.agentOptions?.model === 'other-model'
+    && startSpec?.request?.agentOptions?.reasoningEffort === 'max'
     && spawnMemberRecord.id === 'spawned-member',
+)
+let currentHostSetupThrew = false
+try {
+  installMemberSelectionRuntime({ subagents: {} }, '.agent-teams')
+} catch {
+  currentHostSetupThrew = true
+}
+check(
+  'current host without registerContinuableSetup still mounts',
+  currentHostSetupThrew === false,
 )
 check(
   'spawn prompt carries the first task brief',

@@ -181,53 +181,65 @@ export async function resolveMemberLlmSelection(
   }
 }
 
+/** Older Harness exposed a child-setup hook; current `ctx.subagents` does not. */
+type SubagentsWithLegacySetup = {
+  registerContinuableSetup?: (setup: (childCtx: Context) => (() => void) | void) => void
+}
+
 /**
  * Install the member selection bridge for every fresh or cold-resumed
  * continuable child. Fresh creation reads the pending in-memory selection;
  * cold resume restores the same selection from the owning team's durable
  * record. Legacy members without a complete saved route retain Harness's
  * descriptor provider/model behavior.
+ *
+ * Current Harness dropped `registerContinuableSetup`. Spawn now passes the
+ * route on `startContinuable` `agentOptions`; cold resume reads the
+ * descriptor. The hook is kept only when the host still exposes it.
  */
 export function installMemberSelectionRuntime(ctx: Context, stateDir: string): MemberSelectionRuntime {
   const pending = new Map<string, MemberLlmSelection>()
-  ctx.subagents.registerContinuableSetup((childCtx) => {
-    const child = childCtx.agent
-    if (child === undefined) return () => undefined
-    const suffix = child.session.events.slice(child.session.header.seedLength ?? 0)
-    const descriptor = foldSubagentDescriptor(suffix)
-    if (descriptor?.mode !== 'continuable' || !descriptor.label.startsWith(MEMBER_LABEL_PREFIX)) {
-      return () => undefined
-    }
-
-    const parentSessionId = child.session.header.parentSession
-    if (parentSessionId === undefined) return () => undefined
-    const key = pendingSelectionKey(parentSessionId, descriptor.label)
-    let selection = pending.get(key)
-    if (selection === undefined) {
-      const identity = descriptor.label.slice(MEMBER_LABEL_PREFIX.length)
-      const separator = identity.indexOf(':')
-      if (separator < 1 || separator === identity.length - 1) return () => undefined
-      const teamId = identity.slice(0, separator)
-      const memberName = identity.slice(separator + 1)
-      const workspace = resolveTeamWorkspace(child.session.header.cwd ?? process.cwd(), stateDir)
-      const team = readTeamSync(join(workspace, stateDir), teamId)
-      if (team?.captainSessionId !== parentSessionId) return () => undefined
-      selection = selectionFromMember(team.members.find(member => member.name === memberName))
-      // An old team record has no provider/reasoning snapshot. Its durable
-      // Harness descriptor still restores provider/model, so leave it alone.
-      if (selection === undefined) return () => undefined
-      if (descriptor.agentProvider !== selection.provider || descriptor.agentModel !== selection.model) {
-        throw new Error(
-          `agent-teams: saved model route for member "${memberName}" does not match its subagent descriptor`,
-        )
+  const register = (ctx.subagents as SubagentsWithLegacySetup).registerContinuableSetup
+  if (typeof register === 'function') {
+    register((childCtx) => {
+      const child = childCtx.agent
+      if (child === undefined) return () => undefined
+      const suffix = child.session.events.slice(child.session.header.seedLength ?? 0)
+      const descriptor = foldSubagentDescriptor(suffix)
+      if (descriptor?.mode !== 'continuable' || !descriptor.label.startsWith(MEMBER_LABEL_PREFIX)) {
+        return () => undefined
       }
-    }
 
-    return installModelSelection(childCtx, {
-      current: modelSelection(selection),
-      assembled: undefined,
+      const parentSessionId = child.session.header.parentSession
+      if (parentSessionId === undefined) return () => undefined
+      const key = pendingSelectionKey(parentSessionId, descriptor.label)
+      let selection = pending.get(key)
+      if (selection === undefined) {
+        const identity = descriptor.label.slice(MEMBER_LABEL_PREFIX.length)
+        const separator = identity.indexOf(':')
+        if (separator < 1 || separator === identity.length - 1) return () => undefined
+        const teamId = identity.slice(0, separator)
+        const memberName = identity.slice(separator + 1)
+        const workspace = resolveTeamWorkspace(child.session.header.cwd ?? process.cwd(), stateDir)
+        const team = readTeamSync(join(workspace, stateDir), teamId)
+        if (team?.captainSessionId !== parentSessionId) return () => undefined
+        selection = selectionFromMember(team.members.find(member => member.name === memberName))
+        // An old team record has no provider/reasoning snapshot. Its durable
+        // Harness descriptor still restores provider/model, so leave it alone.
+        if (selection === undefined) return () => undefined
+        if (descriptor.agentProvider !== selection.provider || descriptor.agentModel !== selection.model) {
+          throw new Error(
+            `agent-teams: saved model route for member "${memberName}" does not match its subagent descriptor`,
+          )
+        }
+      }
+
+      return installModelSelection(childCtx, {
+        current: modelSelection(selection),
+        assembled: undefined,
+      })
     })
-  })
+  }
 
   return {
     async withPending<T>(
@@ -451,6 +463,9 @@ export async function spawnMember(
       agentOptions: {
         provider: llmSelection.provider,
         model: llmSelection.model,
+        ...llmSelection.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: ReasoningEffortId(llmSelection.reasoningEffort) },
       },
       ...config.maxDepth !== undefined ? { maxDepth: config.maxDepth } : {},
     },
