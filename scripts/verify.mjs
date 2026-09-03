@@ -620,7 +620,7 @@ const memberAccepted = await deliverToMember(
   {
     subagents: {
       interrupt: (id, authority) => memberInterrupts.push({ id, authority }),
-      followup: async (_captain, id, content) => {
+      sendMessage: async (_captain, id, content) => {
         memberFollowups.push({ id, content })
         return 'msg-1'
       },
@@ -633,7 +633,7 @@ const memberAccepted = await deliverToMember(
   new AbortController().signal,
 )
 check(
-  'default member delivery interrupts the current turn before followup',
+  'default member delivery interrupts the current turn before sendMessage',
   memberAccepted
     && memberInterrupts.length === 1
     && memberInterrupts[0]?.id === 'sess-backend'
@@ -646,7 +646,7 @@ const queuedAccepted = await deliverToMember(
   {
     subagents: {
       interrupt: (id, authority) => queuedInterrupts.push({ id, authority }),
-      followup: async (_captain, id, content) => {
+      sendMessage: async (_captain, id, content) => {
         queuedFollowups.push({ id, content })
         return 'msg-q'
       },
@@ -672,7 +672,7 @@ const bargedAccepted = await deliverToMember(
   {
     subagents: {
       interrupt: (id, authority) => bargedInterrupts.push({ id, authority }),
-      followup: async (_captain, id, content) => {
+      sendMessage: async (_captain, id, content) => {
         bargedFollowups.push({ id, content })
         return 'msg-2'
       },
@@ -686,7 +686,7 @@ const bargedAccepted = await deliverToMember(
   'barge',
 )
 check(
-  'barge member delivery interrupts the current turn before followup',
+  'barge member delivery interrupts the current turn before sendMessage',
   bargedAccepted
     && bargedInterrupts.length === 1
     && bargedInterrupts[0]?.id === 'sess-backend'
@@ -970,14 +970,16 @@ function descriptorEvent(label, agentProvider = 'descriptor-provider', agentMode
 }
 
 function fakeChildContext({ label, parentSessionId, cwd, agentProvider, agentModel }) {
+  const events = [descriptorEvent(label, agentProvider, agentModel)]
   const listeners = new Map()
   return {
     listeners,
     context: {
       agent: {
         session: {
-          header: { parentSession: parentSessionId, cwd, seedLength: 0 },
-          events: [descriptorEvent(label, agentProvider, agentModel)],
+          header: { parentSession: parentSessionId, cwd },
+          snapshotEvents: () => events,
+          ownEvents: () => events,
         },
       },
       on(name, listener) {

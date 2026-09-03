@@ -204,7 +204,11 @@ export function installMemberSelectionRuntime(ctx: Context, stateDir: string): M
     register((childCtx) => {
       const child = childCtx.agent
       if (child === undefined) return () => undefined
-      const suffix = child.session.events.slice(child.session.header.seedLength ?? 0)
+      const suffix = typeof child.session.ownEvents === 'function'
+        ? child.session.ownEvents()
+        : typeof child.session.snapshotEvents === 'function'
+          ? child.session.snapshotEvents()
+          : []
       const descriptor = foldSubagentDescriptor(suffix)
       if (descriptor?.mode !== 'continuable' || !descriptor.label.startsWith(MEMBER_LABEL_PREFIX)) {
         return () => undefined
@@ -530,13 +534,12 @@ export async function deliverToMember(
 ): Promise<boolean> {
   if (mode === 'barge') interruptMember(ctx, captain, childId)
   try {
-    await ctx.subagents.followup(captain, brandedSessionId(childId), [{ type: 'text', text }], {
-      source: { kind: 'plugin', plugin: 'dsh-agent-teams' },
+    await ctx.subagents.sendMessage(captain, brandedSessionId(childId), [{ type: 'text', text }], {
       signal,
     })
     return true
   } catch (error: unknown) {
-    ctx.logger.warn(`agent-teams: followup to member ${childId} failed: ${String(error)}`)
+    ctx.logger.warn(`agent-teams: sendMessage to member ${childId} failed: ${String(error)}`)
     return false
   }
 }

@@ -14,6 +14,12 @@
   / `preset "team" failed to mount`). Guard the hook; pass provider/model/
   reasoning on `startContinuable` `agentOptions`. Cold resume uses the
   Harness descriptor. Keep the hook only when the host still exposes it.
+- DSH 0.1.2-alpha.5 (`b4a2a68`) also removed `ctx.subagents.followup`.
+  Member barge/queue uses `ctx.subagents.sendMessage(captain, childId, content, { signal })`.
+  That public API always steers (nearest step); barge still interrupts first.
+  Captain reports still use `Agent.followup` (that method remains).
+  Live logs are `session.snapshotEvents()`, not `.events`.
+  `JsonValue` is no longer re-exported from `@deepseek-ai/dsh-session`.
 - Dual-mode host vs Team preset: host mounts `registerTools: false`
   (Web panel only); Team preset mounts `registerWeb: false` (tools +
   usage section). Defaults stay true so a single-row install still works.

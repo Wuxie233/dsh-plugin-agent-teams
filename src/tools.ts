@@ -12,7 +12,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { JsonValue, SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionId } from '@deepseek-ai/dsh-session'
+
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { join } from 'node:path'
@@ -58,6 +60,7 @@ import {
   lastTurnEndKind,
   shouldNotifyMemberStall,
   stallCaptainMessage,
+  type StallSessionEvent,
 } from './stall.ts'
 import type { TeamMember, TeamState, TeamTask } from './types.ts'
 
@@ -79,6 +82,10 @@ export function assertMemberCap(
   if (liveCount >= maxMembers) {
     throw new Error(`team "${team.name}" is at its member cap (${liveCount}/${maxMembers})`)
   }
+}
+
+function sessionLog(session: { snapshotEvents?: () => readonly StallSessionEvent[] }): readonly StallSessionEvent[] {
+  return typeof session.snapshotEvents === 'function' ? session.snapshotEvents() : []
 }
 
 /** Resolved plugin config consumed by the tools. */
@@ -313,7 +320,7 @@ async function notifyCaptainOfMemberStall(ctx: Context, config: ToolsConfig, age
     const verdict = shouldNotifyMemberStall({
       memberStatus: member.status,
       activity: agent.status,
-      lastTurnEndKind: lastTurnEndKind(agent.session.events),
+      lastTurnEndKind: lastTurnEndKind(sessionLog(agent.session)),
       openTaskIds,
       pendingInbox: agent.inbox.hasPending,
       lastStallNotice: lastMatchingStallNotice(inbox, member.name, openTaskIds),
@@ -328,7 +335,7 @@ async function notifyCaptainOfMemberStall(ctx: Context, config: ToolsConfig, age
       const locked = shouldNotifyMemberStall({
         memberStatus: member.status,
         activity: agent.status,
-        lastTurnEndKind: lastTurnEndKind(agent.session.events),
+        lastTurnEndKind: lastTurnEndKind(sessionLog(agent.session)),
         openTaskIds: stillOpen,
         pendingInbox: agent.inbox.hasPending,
         lastStallNotice: lastMatchingStallNotice(lockedInbox, member.name, stillOpen),

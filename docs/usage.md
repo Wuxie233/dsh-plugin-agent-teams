@@ -10,7 +10,7 @@
 |---|---|
 | `ctx.tools` 注册表 | 注册 10 个 `agent_teams_*` 工具（与 `tool-workflow` 同一注册路径） |
 | `ctx.subagents.startContinuable()` | 创建成员：durable 可续聊子代理，带成员 persona |
-| `ctx.subagents.interrupt()` + `followup()` / `Agent.cancel()` + `followup()` | 默认插话：先打断收件人当前轮次再立刻投递；`mode=queue` 才排到下一轮 |
+| `ctx.subagents.interrupt()` + `sendMessage()` / `Agent.cancel()` + `followup()` | 默认插话：先打断收件人当前轮次再立刻投递；`mode=queue` 才不打断。成员投递走公开的 `sendMessage`（steer 到最近 step）；队长报告仍用 `Agent.followup` |
 | `ctx.subagents.listChildren()` + `ctx.agents.get().status` | 查询成员是否正在跑一轮（store 里的 `running` 只表示会话还在内存，停掉的对话仍可能是 `running`） |
 | `ctx.systemPrompt.section()` | 注册"AgentTeams 使用策略"提示段 |
 | Web server 路由注册 | 活动面板数据路由 `/plugins/dsh-agent-teams/state` + 鲸鱼图片静态服务（`webServer`/`httpServer` 双键兼容，见下） |
